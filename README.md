@@ -6,6 +6,12 @@ A guitar amp modeler pedal for the [Daisy Pod](https://www.electro-smith.com/dai
 
 This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post](link to blog post).
 
+## Prerequisites
+
+- [DaisyToolchain](https://github.com/electro-smith/DaisyToolchain) — ARM cross-compiler and tools for the Daisy platform
+- A Daisy Pod board with a micro SD card
+- A USB cable and serial terminal application (see note above)
+
 > **Important — USB serial terminal required:** The firmware currently waits
 > for a USB serial connection at startup (`StartLog(true)`). If no serial
 > terminal is connected, the board will **stall indefinitely** and never reach
@@ -13,12 +19,6 @@ This was created as a helpful blueprint to guide the creation of embedded device
 > `minicom`, PuTTY, or the Arduino Serial Monitor) on the Daisy's USB port
 > before powering on / resetting the board. See the [Serial Monitor](#serial-monitor)
 > section for details.
-
-## Prerequisites
-
-- [DaisyToolchain](https://github.com/electro-smith/DaisyToolchain) — ARM cross-compiler and tools for the Daisy platform
-- A Daisy Pod board with a micro SD card
-- A USB cable and serial terminal application (see note above)
 
 ## Setup
 
