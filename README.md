@@ -2,6 +2,10 @@
 
 A guitar amp modeler pedal for the [Daisy Pod](https://www.electro-smith.com/daisy/pod) running [Neural Amp Modeler](https://github.com/sdatkinson/NeuralAmpModelerCore) (NAM) models. It loads `.namb` binary model files from an SD card and provides two knobs for gain (input level) and volume (output level).
 
+## Motivation
+
+This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post](link to blog post).
+
 > **Important — USB serial terminal required:** The firmware currently waits
 > for a USB serial connection at startup (`StartLog(true)`). If no serial
 > terminal is connected, the board will **stall indefinitely** and never reach
@@ -149,14 +153,53 @@ Audio engine started
 cb=48  cycles=142200  max=142350  gain=0.500  vol=0.750  BYPASS
 ```
 
+### Getting a NAM Model
+
+The firmware loads a `.namb` (binary) model file from the SD card. Most NAM
+models are distributed as `.nam` (JSON) files, so you need to convert them
+first.
+
+#### 1. Download a model
+
+Download the **nano relu** version of the
+[Fender '65 Deluxe Reverb Boosted with Klon](https://www.tone3000.com/tones/fender-65-deluxe-reverb-boosted-with-klon-43185)
+model from Tone3000. The nano relu architecture is small enough to fit within
+the 4 KB model buffer and fast enough to run in real time on the Daisy.
+
+> **Note:** Only `nano` (and some `feather`) models are small and fast enough
+> for the Daisy's Cortex-M7. Larger architectures (standard, lite) will either
+> exceed the file size limit or miss the 1 ms audio deadline.
+
+#### 2. Convert `.nam` to `.namb`
+
+The `nam-binary-loader` submodule includes a converter tool. Build it from the
+repository root:
+
+```bash
+cd nam-binary-loader
+mkdir build && cd build
+cmake .. -DNAM_CORE_PATH=../../NeuralAmpModelerCore
+make
+```
+
+Then convert your downloaded model:
+
+```bash
+./nam2namb /path/to/downloaded-model.nam nano_relu.namb
+```
+
+#### 3. Copy to SD card
+
+Copy the resulting `nano_relu.namb` file to the root of a FAT32-formatted micro
+SD card.
+
 ### Running the Pedal
 
-1. Copy a `.namb` model file to the root of a FAT32-formatted micro SD card, named `nano_relu.namb`
-2. Insert the SD card into the Daisy Pod
-3. Connect the Daisy Pod to your computer via USB and open a serial terminal (see above)
-4. Power on or reset the board — the serial terminal must be open **before** this step
-5. Wait for the `Audio engine started` message in the serial output
-6. Connect your guitar to the audio input and an amp/headphones to the audio output
+1. Insert the SD card (with `nano_relu.namb` at the root) into the Daisy Pod
+2. Connect the Daisy Pod to your computer via USB and open a serial terminal (see above)
+3. Power on or reset the board — the serial terminal must be open **before** this step
+4. Wait for the `Audio engine started` message in the serial output
+5. Connect your guitar to the audio input and an amp/headphones to the audio output
 
 ### Controls
 
