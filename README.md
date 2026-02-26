@@ -2,11 +2,9 @@
 
 A guitar amp modeler pedal for the [Daisy Pod](https://www.electro-smith.com/daisy/pod) running [Neural Amp Modeler](https://github.com/sdatkinson/NeuralAmpModelerCore) (NAM) models. It loads `.namb` binary model files from an SD card and provides two knobs for gain (input level) and volume (output level).
 
-[We published a post about this and more in the Tone3000 blog](https://www.tone3000.com/blog/running-nam-on-embedded-hardware).
-
 ## Motivation
 
-This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post](link to blog post).
+This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post]([link to blog post](https://www.tone3000.com/blog/running-nam-on-embedded-hardware)).
 
 ## Prerequisites
 
