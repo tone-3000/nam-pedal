@@ -4,7 +4,7 @@ A guitar amp modeler pedal for the [Daisy Pod](https://www.electro-smith.com/dai
 
 ## Motivation
 
-This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post]([link to blog post](https://www.tone3000.com/blog/running-nam-on-embedded-hardware)).
+This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post](https://www.tone3000.com/blog/running-nam-on-embedded-hardware).
 
 ## Prerequisites
 
