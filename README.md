@@ -56,11 +56,21 @@ This cross-compiles for the STM32H750 (Cortex-M7) using `BOOT_QSPI` app type for
 
 ## Flashing
 
-Put the Daisy Pod into DFU mode (hold BOOT, press RESET), then:
+Because this app leverages Daisy's QSPI flash memory to accommodate program size, a *bootloader* must be flashed before the main program.
+
+To install a bootloader, put the Daisy Pod into DFU mode (hold BOOT, press RESET), then:
+
+```bash
+make program-boot
+```
+
+When the Daisy power-cycles (can trigger manually by pressing RESET), you will see the BOOT led sweep in and out, indicating a grace period during which the device can be flashed by running:
 
 ```bash
 make program-dfu
 ```
+
+The grace period can be extended indefinitely by pressing BOOT. 
 
 ## Usage
 
