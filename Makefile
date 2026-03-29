@@ -1,6 +1,6 @@
 TARGET = NAMPedal
 
-LIBDAISY_DIR = ../../libDaisy
+LIBDAISY_DIR = libDaisy
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
 
 CPP_SOURCES = \

@@ -22,34 +22,34 @@ This was created as a helpful blueprint to guide the creation of embedded device
 
 ## Setup
 
-### 1. Clone DaisyExamples and build libDaisy
-
-```bash
-git clone https://github.com/electro-smith/DaisyExamples
-cd DaisyExamples
-git submodule update --init --recursive
-cd libDaisy
-make
-cd ..
-```
-
-### 2. Clone NAMPedal
+### 1. Clone NAMPedal
 
 ```bash
 cd seed
-git clone --recursive https://github.com/tone-3000/NAMPedal
+git clone --recurse-submodules https://github.com/tone-3000/NAMPedal
 cd NAMPedal
 ```
 
-The `--recursive` flag pulls in the two submodules:
+The `--recurse-submodules` flag pulls in all submodules and their nested dependencies:
 
 - **NeuralAmpModelerCore** — DSP engine (LSTM, WaveNet, ConvNet architectures)
 - **nam-binary-loader** — `.namb` binary model parser
+- **libDaisy** - Electrosmith's C++ hardware abstraction layer for the Daisy
 
-## Building
+### 2. Build libDaisy
 
 ```bash
-make
+cd libDaisy
+make -j$(getconf _NPROCESSORS_ONLN)
+cd ..
+```
+
+The `-j$(getconf _NPROCESSORS_ONLN)` flag will build libDaisy with all available processor cores.
+
+## Building NAMPedal
+
+```bash
+make -j$(getconf _NPROCESSORS_ONLN)
 ```
 
 This cross-compiles for the STM32H750 (Cortex-M7) using `BOOT_QSPI` app type for the larger binary size NAM requires.

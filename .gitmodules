@@ -4,3 +4,6 @@
 [submodule "nam-binary-loader"]
 	path = nam-binary-loader
 	url = https://github.com/tone-3000/nam-binary-loader.git
+[submodule "libDaisy"]
+	path = libDaisy
+	url = https://github.com/electro-smith/libDaisy
