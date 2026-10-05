@@ -5,7 +5,7 @@ TARGET = NAMPedal
 # If your toolchain isn't on PATH, point at it without editing this file:
 #   make GCC_PATH=/path/to/toolchain/bin
 #   export GCC_PATH=/path/to/toolchain/bin   (in your shell profile)
-GCC_PATH ?=
+GCC_PATH ?= 
 
 LIBDAISY_DIR = ../../libDaisy
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core

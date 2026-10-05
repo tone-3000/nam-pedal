@@ -5,7 +5,7 @@
 // MODEL_BANK_ADDR.  The bank is built and flashed with pack_models.py,
 // independently of the firmware, so models can be swapped without recompiling.
 //
-// Signal chain: input -> noise gate -> input gain -> NAM -> 3-band EQ -> IR -> output volume.
+// Signal chain: input -> noise gate -> input gain -> NAM -> loudness normalize -> 3-band EQ -> IR -> output volume.
 //
 // T3K Pedal controls:
 //   INPUT_GAIN, OUTPUT_VOLUME, BASS, MID, TREBLE, NOISE_GATE_THRESHOLD knobs
@@ -100,9 +100,9 @@ static constexpr Pin ToPin(dsy_gpio_pin p)
 
 // Order must match T3kPedal::Knob (INPUT_GAIN, OUTPUT_VOLUME, BASS, MID,
 // TREBLE, NOISE_GATE_THRESHOLD) — each entry must be an ADC-capable Seed
-// pin (seed::A0..A11).
+// pin (seed::A0..A11). The PCB wires the pots to ADC_0..ADC_5 in that order.
 static constexpr Pin kKnobPins[6]
-    = {seed::A1, seed::A2, seed::A3, seed::A4, seed::A5, seed::A6};
+    = {seed::A0, seed::A1, seed::A2, seed::A3, seed::A4, seed::A5};
 static Switch footswitch;
 static Switch rotary1, rotary2, rotary3, rotary4;
 static GPIO   led_status;
@@ -237,6 +237,31 @@ static constexpr int kPrewarmSamples = 1 + 4090 + 196 + 2045;
 
 static constexpr uint32_t NAMB_MAGIC = 0x4E414D42; // "NAMB"
 
+// Loudness normalization, as in the TONE3000 plugin: bring the model's
+// metadata.loudness to a fixed target, clamped to ±12 dB. Models without
+// loudness metadata pass at unity.
+static constexpr float kTargetLoudnessDb  = -18.0f;
+static constexpr float kMaxNormalizeDb    = 12.0f;
+static constexpr size_t kNambMetaSize     = 80;   // header 32 + metadata 48
+static constexpr size_t kNambMetaFlagsOff = 35;
+static constexpr size_t kNambLoudnessOff  = 44;   // f64
+static constexpr uint8_t kMetaHasLoudness = 0x01;
+static volatile float model_gain          = 1.0f; // post-NAM linear gain
+
+static float NormalizeGain(const uint8_t* data, uint32_t size)
+{
+    if(size < kNambMetaSize || !(data[kNambMetaFlagsOff] & kMetaHasLoudness))
+        return 1.0f;
+    double loudness;
+    memcpy(&loudness, data + kNambLoudnessOff, sizeof(loudness));
+    if(!(loudness > -100.0 && loudness <= 0.0))
+        return 1.0f;
+    float db = kTargetLoudnessDb - (float)loudness;
+    db       = fmaxf(-kMaxNormalizeDb, fminf(kMaxNormalizeDb, db));
+    LOG("  loudness=%.1f dB -> normalize %+.1f dB", (float)loudness, db);
+    return powf(10.0f, db / 20.0f);
+}
+
 // ── Model loading ─────────────────────────────────────────────────────────
 
 static void Prewarm(int prewarm_samples)
@@ -303,6 +328,15 @@ static bool LoadModel(uint32_t idx)
         e.name,
         (unsigned long)size);
 
+    // The loader app always writes 4 entries (one per rotary position) and
+    // marks unassigned presets with a zero-size blob. Treat those as "no
+    // model": the caller leaves model_loaded=false and audio passes through.
+    if(size == 0)
+    {
+        LOG("  preset is empty (no model assigned)");
+        return false;
+    }
+
     if(size < 32)
     {
         LOG("  data too small for NAMB header");
@@ -341,6 +375,8 @@ static bool LoadModel(uint32_t idx)
         LOG("  nam_load_weights failed (not an A2-nano model?)");
         return false;
     }
+
+    model_gain = NormalizeGain(data, size);
 
     // ── Cabinet IR ────────────────────────────────────────────────────────
     // Clear state regardless of whether a new IR is present.
@@ -516,15 +552,16 @@ static void AudioCallback(AudioHandle::InterleavingInputBuffer  in,
 
         uint32_t cyc0 = DWT->CYCCNT;
 
-        // Signal chain matches the NAM plugin: NAM → EQ → IR.
+        // Signal chain matches the NAM plugin: NAM → normalize → EQ → IR.
         nam_process(&nam_state,
                     (const float* const*)&input_ptr,
                     &output_ptr,
                     num_frames);
 
-        // EQ in-place on mono_out (NAM output).
+        // Loudness normalization and EQ in-place on mono_out (NAM output).
+        const float norm = model_gain;
         for(size_t i = 0; i < num_frames; i++)
-            mono_out[i] = eq.Process(mono_out[i]);
+            mono_out[i] = eq.Process(mono_out[i] * norm);
 
         // Cabinet IR (if loaded): mono_out → mono_in.
         // mono_in is free — NAM has consumed it — so use it as scratch.
@@ -881,6 +918,15 @@ int main(void)
                 rotary2.Pressed() ? 1 : 0,
                 rotary3.Pressed() ? 1 : 0,
                 rotary4.Pressed() ? 1 : 0);
+            // GPIO::Read() returns the pin's *input data register*, i.e. the
+            // actual voltage on the pin even in output mode. A pin commanded
+            // high that reads back 0 is being pulled down externally.
+            LOG("  led pins (readback): status=%d p1=%d p2=%d p3=%d p4=%d",
+                led_status.Read() ? 1 : 0,
+                led_preset[0].Read() ? 1 : 0,
+                led_preset[1].Read() ? 1 : 0,
+                led_preset[2].Read() ? 1 : 0,
+                led_preset[3].Read() ? 1 : 0);
             LOG("  gain=%.2f vol=%.2f eq[%.1f %.1f %.1f]",
                 gain,
                 volume,
