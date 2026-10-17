@@ -4,6 +4,20 @@ A guitar amp modeler pedal for the [PedalPCB Terrarium](https://www.pedalpcb.com
 
 Inference uses hand-tuned, dependency-free C code specialized for the A2-nano WaveNet architecture and optimized for embedded Cortex-M7 targets. There is no dependency on the NeuralAmpModelerCore C++ library at build or runtime. Any A2-nano `.namb` whose weights match the fixed architecture can be swapped in at runtime.
 
+![TONE3000 DIY Pedal and PCB (render)](docs/images/hero.jpg)
+
+## Hardware
+
+The `hardware/` directory has everything to build the TONE3000 DIY Pedal: KiCad project and Gerbers, bill of
+materials, 1590XX enclosure drill template and faceplate artwork, 3D models and renders. See
+[`hardware/README.md`](hardware/README.md) and the step-by-step [build guide](https://www.tone3000.com/guides/diy-pedal).
+
+| | |
+| --- | --- |
+| [![Pedal](docs/images/pedal.jpg)](hardware/renders) | [![PCB](docs/images/pcb.jpg)](hardware/pcb) |
+
+![Build animation](docs/images/build-animation.gif)
+
 ## Motivation
 
 This was created as a helpful blueprint to guide the creation of embedded devices that can run NAM. For more information on the work that led to this, check [this blog post](https://www.tone3000.com/blog/running-nam-on-embedded-hardware).

@@ -1,0 +1,105 @@
+(footprint "2T 6.35mm 14 Stereo Chassis Socket"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0 -1.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "9de5334c-5988-4b2d-a3bc-e8dc31d12c85")
+		(effects
+			(font
+				(size 1.016 1)
+				(thickness 0.1524)
+			)
+		)
+	)
+	(property "Value" "JACK_TRS_SWITCHING"
+		(at 0 1 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "b85feb92-5815-41d4-95a0-1320a636d3e2")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "d4925675-3b3f-4f70-bf38-0180146be1c1")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" "Audio Jack, 3 Poles (Stereo / TRS), Switched Poles (Normalling)"
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "5c3ce766-c9a3-4cad-a9b7-e002546a3e2f")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Field4" "AUDIO_OUT"
+		(at -7 0 0)
+		(unlocked yes)
+		(layer "F.SilkS" knockout)
+		(uuid "3f7d8ad5-1caa-4e03-8d5b-ff275f860411")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property ki_fp_filters "Jack*")
+	(sheetname "/")
+	(sheetfile "nam-pedal-diy.kicad_sch")
+	(clearance 0.25)
+	(attr through_hole)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_text user "${REFERENCE}"
+		(at 0 2.5 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "d2eb3ab0-7bf1-45ee-a934-8b95e443814a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "S" thru_hole roundrect
+		(at 1.5 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15625)
+		(uuid "2ba0e89c-1899-487d-ad48-4b43aabb5913")
+	)
+	(pad "T" thru_hole rect
+		(at -1.5 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "a2e7b784-a973-4cbf-98d2-5a30875018ee")
+	)
+	(embedded_fonts no)
+)

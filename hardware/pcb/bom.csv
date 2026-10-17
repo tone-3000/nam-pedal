@@ -1,0 +1,31 @@
+Reference,Qty,Value,Footprint,Datasheet,URL,Alternative URL,Price per unit
+A1,1,Electrosmith_Daisy_Seed_Rev4,Module:Electrosmith_Daisy_Seed,https://static1.squarespace.com/static/58d03fdc1b10e3bf442567b8/t/6227e6236f02fb68d1577146/1646781988478/Daisy_Seed_datasheet_v1.0.3.pdf,https://daisy.audio/products/seed3,,$29.99
+C1,1,100p,Capacitor_THT:C_Disc_D3.0mm_W1.6mm_P2.50mm,,https://www.taydaelectronics.com/10-x-100pf-50v-ceramic-disc-capacitor-pkg-of-10.html,,0.01 (pack of 10)
+"C2,C4,C5",3,1u,Capacitor_THT:C_Rect_L7.2mm_W2.5mm_P5.00mm,,https://www.taydaelectronics.com/1uf-63v-5-kemet-polyester-film-box-type-capacitor.html,,$0.21
+"C3,C10,C11",3,100u/16V,Capacitor_THT:CP_Radial_D5.0mm_P2.00mm,,https://www.taydaelectronics.com/capacitors/electrolytic-capacitors/100uf-16v-105c-aluminum-radial-electrolytic-capacitor-multicomp-pro.html,,$0.04
+"C6,C7,C8,C9",4,100n,Capacitor_THT:C_Rect_L7.2mm_W2.5mm_P5.00mm,,https://www.taydaelectronics.com/100nf-63v-5-polyester-film-box-type-capacitor-faratronic.html,,$0.07
+D1,1,1N5817,Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal,http://www.vishay.com/docs/88525/1n5817.pdf,https://www.taydaelectronics.com/1n5817-diode-schottky-1a-20v.html,,$0.06
+"D2,D3,D4,D5,D6",5,LED,LED_THT:LED_D3.0mm,,https://www.taydaelectronics.com/flat-top-red-led-3mm-diffuse-lens.html,,$0.05
+"J2,J3",2,JACK_TRS_SWITCHING,Connector_Audio:Jack_6.35mm_Neutrik_NMJ6HCD2_Horizontal,,https://www.taydaelectronics.com/6-35mm-1-4-stereo-chassis-socket-jack-4-terminals.html,https://www.taydaelectronics.com/6-35mm-1-4-stereo-chassis-socket-jack-3-terminals.html,$0.49
+J8,1,Barrel_Jack_Switch,Connector_BarrelJack:BarrelJack_Wuerth_6941xx301002,,https://www.taydaelectronics.com/dc-power-jack-2-1mm-enclosed-frame-with-switch-external.html,,$0.16
+R1,1,1k,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/10-x-resistor-1k-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+"R2,R3,R5,R6",4,1M,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/10-x-resistor-1m-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+"R4,R9",2,3R3,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/10-x-resistor-3-3-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+R7,1,100R,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/resistor-100-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+R8,1,100k,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/10-x-resistor-100k-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+"R10,R11,R12,R13,R14",5,2k,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/resistor-2k-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+R64,1,10K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,,https://www.taydaelectronics.com/10-x-resistor-10k-ohm-1-4w-1-metal-film-pkg-of-10.html,,	$0.015 (pack of 10)
+"RV1,RV2,RV3,RV4,RV5,RV6",6,B10k,Pedal:POT_16MM,,https://www.taydaelectronics.com/b10k-ohm-linear-taper-potentiometer-round-shaft-pc-mount-l.html,,$0.59
+SW1,1,SW_Rotary_1x4_MP,,https://www.taydaelectronics.com/datasheets/files/SP23080077_SPEC_SR2511F-0403-17K0A-C9-S-3.pdf,https://www.taydaelectronics.com/rotary-switch-3-pole-4-position-alpha-sr2511-2684.html,,$1.09
+U1,1,TL072,PDIP8,http://www.ti.com/lit/ds/symlink/tl071.pdf,https://www.taydaelectronics.com/l78l05acz-l78l05-78l05-5-volts-100ma-voltage-regulator-ic.html,,$1.49
+U2,1,LM78L05_TO92,Package_TO_SOT_THT:TO-92_Inline,https://www.onsemi.com/pub/Collateral/MC78L06A-D.pdf,,,$0.15
+,4,3mm LED Bezel,,,https://www.taydaelectronics.com/3mm-bezel-led-holder-chrome-metal.html,,$0.08
+,1,USB-C Extension,,,https://www.adafruit.com/product/6069,,$4.50
+FTSW,1,Footswitch,,,https://www.taydaelectronics.com/3pdt-stomp-foot-pedal-switch-momentary.html,,$2.99
+,1,Rotary Knob,,,https://www.taydaelectronics.com/eqp-1a-black-knob-38x21mm-shaft-6-4-mm.html,,$4.09
+,1,Adapter Sleeve,,,https://www.taydaelectronics.com/6mm-shaft-to-6-3-mm-shaft-adapter-sleeve.html,,$0.35
+,6,Knobs,,,https://www.taydaelectronics.com/knob-davies-1900h-clone-black.html,,$0.42
+,1,1590XX Enclosure,,,https://www.taydaelectronics.com/hardware-tools/enclosures/1590xx-style/1590xx-style-aluminum-diecast-enclosure.html,,$8.99
+,2,Tall 20 pin female header,,,https://www.taydaelectronics.com/20-pin-2-54-mm-single-row-female-pin-header.html,,
+,1,IC socket,,,https://www.taydaelectronics.com/8-pin-dip-ic-socket-machine-tooled.html,,
+RV7,1,Trim Pod,,https://www.taydaelectronics.com/datasheets/RM-065.pdf,https://www.taydaelectronics.com/10k-ohm-trimpot-variable-resistor-6mm.html,,
