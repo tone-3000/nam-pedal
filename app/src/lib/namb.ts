@@ -408,6 +408,12 @@ function writeModelBlock(w: BinaryWriter, model: Json) {
 
 // Mirrors ContainerModel::SetSlimmableSize: selects the first submodel whose
 // max_value > slim_factor, or the last if slim_factor reaches the end.
+//
+// Metadata always comes from the container's top level, as in the plugin
+// (NAMCore applies the container's metadata to the whole model). Per-submodel
+// metadata is deprecated and ignored: TONE3000 writes loudness and the
+// calibration levels (input_level_dbu / output_level_dbu) on the container
+// only, and falling back to a submodel's stale block would drop them.
 export function resolveSlimmableContainer(model: Json, slimFactor = 0.0): Json {
   const submodels: Json[] = model.config?.submodels;
   if (!Array.isArray(submodels) || submodels.length === 0) {
@@ -421,9 +427,10 @@ export function resolveSlimmableContainer(model: Json, slimFactor = 0.0): Json {
     }
   }
   const selected = { ...submodels[activeIndex].model };
-  for (const key of ['version', 'metadata', 'sample_rate']) {
+  for (const key of ['version', 'sample_rate']) {
     if (model[key] !== undefined && selected[key] === undefined) selected[key] = model[key];
   }
+  selected.metadata = model.metadata !== undefined ? model.metadata : {};
   return selected;
 }
 
@@ -436,7 +443,7 @@ export interface NambResult {
   sampleRate: number | null;
 }
 
-// Weight count the NAMPedal firmware accepts (A2-nano WaveNet).
+// Weight count the T3K Pedal firmware accepts (A2-Lite WaveNet).
 export const PEDAL_WEIGHT_COUNT = 1871;
 
 export function convertNamToNamb(namJson: Json, slimFactor = 0.0): NambResult {

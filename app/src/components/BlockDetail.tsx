@@ -5,6 +5,7 @@ import { T3kSlimPlayer, DEFAULT_IRS, DEFAULT_INPUTS } from 'neural-amp-modeler-w
 import 'neural-amp-modeler-wasm/dist/styles.css';
 import type { Model } from '../types';
 import type { Block, BlockKind } from '../lib/flash';
+import { isNamKind } from '../lib/flash';
 import { t3kClient } from '../client';
 import { CrossOriginImage } from './CrossOriginImage';
 
@@ -55,7 +56,7 @@ export function BlockDetail({ kind, block, checking, onModel }: Props) {
           <h2 className="tone-title">{tone.title}</h2>
           <div className="tone-row">
             <span>{GEAR[tone.gear] ?? tone.gear}</span>
-            <span className="badge">{kind === 'nam' ? 'NAM A2' : 'IR'}</span>
+            <span className="badge">{isNamKind(kind) ? 'NAM A2-Lite' : 'IR'}</span>
           </div>
           <div className="tone-row">
             <span className="tone-stat"><Download /> {compact(tone.downloads_count)}</span>
@@ -85,7 +86,7 @@ export function BlockDetail({ kind, block, checking, onModel }: Props) {
             <Folder /> {index + 1}/{models.length}
           </span>
         </div>
-        {kind === 'nam' && (
+        {isNamKind(kind) && (
           <div className="neural-amp-modeler">
             <T3kSlimPlayer id={`model-${model.id}`} getData={getData} />
           </div>

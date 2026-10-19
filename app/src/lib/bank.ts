@@ -1,17 +1,23 @@
-// Model bank builder, port of pack_models.py build_bank().
+// Preset bank builder, port of pack_models.py build_bank().
 //
-// Bank layout (little-endian):
-//   Header (64 B): u32 magic "NAMP", u32 version, u32 num_models, padding
-//   Entries (48 B each): name[32], u32 namb_offset, u32 namb_size,
-//                        u32 ir_offset (0 = none), u32 ir_num_samples
-//   Blobs: raw .namb bytes then optional IR float32[], each 4-byte aligned.
-// Offsets are absolute from bank start.
+// Bank layout (little-endian), version 2:
+//   Header (64 B): u32 magic "NAMP", u32 version, u32 num_presets, padding
+//   Entries (64 B each): name[32],
+//                        u32 nam_offset,  u32 nam_size   (block 1: A2-Lite .namb; 0 = empty preset)
+//                        u32 nam2_offset, u32 nam2_size  (block 2: second .namb, or 0)
+//                        u32 ir_offset,   u32 ir_num_samples (block 2: cab IR, or 0)
+//                        u32 nam_model_id, u32 block2_model_id (TONE3000 model ids, 0 = unknown)
+//   Blobs: raw .namb bytes and IR float32[], each 4-byte aligned.
+// Offsets are absolute from bank start.  nam2 and ir are mutually exclusive.
+// The model ids let "Sync from pedal" rebuild the app's preset state from
+// the pedal's bank directory (firmware 'B' serial command); the firmware
+// itself ignores them.
 
 export const BANK_MAGIC = 0x504d414e; // "NAMP"
-export const BANK_VERSION = 1;
+export const BANK_VERSION = 2;
 export const HEADER_SIZE = 64;
-export const ENTRY_SIZE = 48;
-export const MAX_IR_TAPS = 256; // must match MAX_IR_TAPS in NAMPedal.cpp
+export const ENTRY_SIZE = 64;
+export const MAX_IR_TAPS = 256; // must match MAX_IR_TAPS in t3k_pedal.cpp
 
 // QSPI flash: bank lives at 0x90600000. The Daisy bootloader's writable QSPI
 // region ends at 0x907BFFFF (layout "@Flash /0x90000000/64*4Kg/0x90040000/
@@ -19,31 +25,42 @@ export const MAX_IR_TAPS = 256; // must match MAX_IR_TAPS in NAMPedal.cpp
 export const MODEL_BANK_ADDR = 0x90600000;
 export const MODEL_BANK_MAX_SIZE = 0x1c0000; // 1.75 MB
 
-export interface BankModel {
+export interface BankPreset {
   name: string; // display name, max 31 ASCII chars
-  namb: Uint8Array;
-  ir: Float32Array | null;
+  namb: Uint8Array; // block 1 (empty = unused preset)
+  namb2: Uint8Array | null; // block 2: second capture...
+  ir: Float32Array | null; // ...or cab IR
+  namModelId?: number; // TONE3000 model id of block 1 (0 / absent = unknown)
+  block2ModelId?: number; // TONE3000 model id of block 2, NAM or IR
 }
 
 const align4 = (n: number) => (n + 3) & ~3;
 
-export function buildBank(models: BankModel[]): Uint8Array {
-  const n = models.length;
-  const dataBase = HEADER_SIZE + n * ENTRY_SIZE;
+export function buildBank(presets: BankPreset[]): Uint8Array {
+  const n = presets.length;
 
-  // Compute blob offsets (namb then optional IR per model, 4-byte aligned)
-  const nambOffsets: number[] = [];
-  const irOffsets: number[] = [];
-  let cur = dataBase;
-  for (const m of models) {
-    nambOffsets.push(cur);
-    cur = align4(cur + m.namb.length);
-    if (m.ir) {
-      irOffsets.push(cur);
-      cur = align4(cur + m.ir.length * 4);
-    } else {
-      irOffsets.push(0);
+  // Lay out the blobs in order (namb, namb2, ir per preset), 4-byte aligned.
+  // Each blob is [offset, bytes]; offset 0 = absent.
+  type Blob = [number, Uint8Array];
+  const toBytes = (ir: Float32Array) => {
+    const bytes = new Uint8Array(ir.length * 4);
+    const v = new DataView(bytes.buffer);
+    ir.forEach((x, i) => v.setFloat32(i * 4, x, true)); // explicit little-endian
+    return bytes;
+  };
+  const layout: Blob[][] = [];
+  let cur = HEADER_SIZE + n * ENTRY_SIZE;
+  for (const p of presets) {
+    const row: Blob[] = [];
+    for (const bytes of [p.namb, p.namb2, p.ir && toBytes(p.ir)]) {
+      if (!bytes || bytes.length === 0) {
+        row.push([0, new Uint8Array(0)]);
+        continue;
+      }
+      row.push([cur, bytes]);
+      cur = align4(cur + bytes.length);
     }
+    layout.push(row);
   }
 
   const out = new Uint8Array(cur);
@@ -54,29 +71,21 @@ export function buildBank(models: BankModel[]): Uint8Array {
   view.setUint32(4, BANK_VERSION, true);
   view.setUint32(8, n, true);
 
-  // Entries
+  // Entries + blobs.  The IR size field is a sample count, not bytes.
   const enc = new TextEncoder();
-  for (let i = 0; i < n; i++) {
+  layout.forEach((row, i) => {
     const base = HEADER_SIZE + i * ENTRY_SIZE;
     // ASCII name, max 31 chars + NUL padding (non-ASCII replaced)
-    const ascii = models[i].name.replace(/[^\x20-\x7e]/g, '?').slice(0, 31);
+    const ascii = presets[i].name.replace(/[^\x20-\x7e]/g, '?').slice(0, 31);
     out.set(enc.encode(ascii), base);
-    view.setUint32(base + 32, nambOffsets[i], true);
-    view.setUint32(base + 36, models[i].namb.length, true);
-    view.setUint32(base + 40, irOffsets[i], true);
-    view.setUint32(base + 44, models[i].ir ? models[i].ir!.length : 0, true);
-  }
-
-  // Blobs
-  for (let i = 0; i < n; i++) {
-    out.set(models[i].namb, nambOffsets[i]);
-    const ir = models[i].ir;
-    if (ir) {
-      for (let j = 0; j < ir.length; j++) {
-        view.setFloat32(irOffsets[i] + j * 4, ir[j], true);
-      }
-    }
-  }
+    row.forEach(([offset, bytes], j) => {
+      view.setUint32(base + 32 + j * 8, offset, true);
+      view.setUint32(base + 36 + j * 8, j === 2 ? bytes.length / 4 : bytes.length, true);
+      if (offset) out.set(bytes, offset);
+    });
+    view.setUint32(base + 56, presets[i].namModelId ?? 0, true);
+    view.setUint32(base + 60, presets[i].block2ModelId ?? 0, true);
+  });
 
   return out;
 }

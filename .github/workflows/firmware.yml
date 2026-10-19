@@ -1,0 +1,50 @@
+name: Firmware
+
+# Builds the firmware on every push and pull request. On a release tag
+# (v1.0.0, ...) the release build's t3k_pedal.bin is attached to the GitHub
+# release, which is what the build guide points users at.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: t3k_pedal.bin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install arm-none-eabi-gcc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+          arm-none-eabi-gcc --version | head -1
+
+      - name: Build (release)
+        run: make
+
+      - name: Build (LOGGING=1)
+        run: |
+          mv build/t3k_pedal.bin t3k_pedal.bin
+          make clean
+          make LOGGING=1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t3k_pedal-${{ github.sha }}
+          path: t3k_pedal.bin
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: t3k_pedal.bin
+          generate_release_notes: true

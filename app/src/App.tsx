@@ -5,9 +5,12 @@ import { startOAuthPopup, handleOAuthCallbackFromPopup } from './tone3000-client
 import type { OAuthPopupOptions } from './tone3000-client';
 import { t3kClient } from './client';
 import type { Model, EmbeddedUser } from './types';
-import type { Preset, BlockKind } from './lib/flash';
-import { analyzeNamFile, isPedalCompatible, emptyPresets, isNamFile, isIrFile } from './lib/flash';
+import type { Preset, BlockKind, NamKind, Slot } from './lib/flash';
+import { analyzeNamFile, isPedalCompatible, emptyPresets, isNamFile, isIrFile, isNamKind } from './lib/flash';
 import { PEDAL_WEIGHT_COUNT } from './lib/namb';
+import { readBankDirectory } from './lib/serial';
+import { resolvePedalBank } from './lib/sync';
+import { loadPresets, savePresets } from './lib/store';
 import { Header } from './components/Header';
 import { Splash } from './components/Splash';
 import { Chain } from './components/Chain';
@@ -40,54 +43,99 @@ import { Spinner } from './components/Spinner';
   window.close();
 })();
 
+const KINDS = ['nam', 'nam2', 'ir'] as const;
 const LOGIN_OPTIONS: OAuthPopupOptions = { menubar: true };
-const SELECT_OPTIONS: Record<BlockKind, OAuthPopupOptions> = {
-  nam: { prompt: 'select_tone', format: 'nam', architecture: 2, menubar: true, preview: true },
-  ir: { prompt: 'select_tone', format: 'ir', gears: 'cab', menubar: true, preview: true },
+// Slot 1 is an A2 capture. Slot 2 takes a second capture or a cab IR, so its
+// picker is open to both formats and every gear but spaces (room/reverb IRs);
+// IR tones pass through the architecture filter untouched.
+const SELECT_OPTIONS: Record<Slot, OAuthPopupOptions> = {
+  1: { prompt: 'select_tone', format: 'nam', architecture: 2, menubar: true, preview: true },
+  2: { prompt: 'select_tone', architecture: 2, gears: 'amp_amp-cab_pedal_outboard_cab_experimental', menubar: true, preview: true },
 };
+
+// The last session's presets come back from localStorage (without the parsed
+// .nam, which is re-downloaded once signed in).
+const restored = loadPresets();
 
 export default function App() {
   const [user, setUser] = useState<EmbeddedUser | null>(null);
   const [entered, setEntered] = useState(false);
-  const [presets, setPresets] = useState<Preset[]>(emptyPresets);
-  const [selected, setSelected] = useState(0);
+  const [presets, setPresets] = useState<Preset[]>(() => restored?.presets ?? emptyPresets());
+  const [selected, setSelected] = useState(restored?.selected ?? 0);
   const [block, setBlock] = useState<BlockKind>('nam');
   const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(false);
+  // Number of .nam downloads in flight (restore and sync check several at once).
+  const [checkCount, setCheckCount] = useState(0);
+  const checking = checkCount > 0;
   const [browsing, setBrowsing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [flashOpen, setFlashOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const popup = useRef<Window | null>(null);
-  // Which block the open select popup is for.
-  const target = useRef<{ preset: number; kind: BlockKind }>({ preset: 0, kind: 'nam' });
+  // Which chain slot the open select popup is for.
+  const target = useRef<{ preset: number; slot: Slot }>({ preset: 0, slot: 1 });
 
   const updatePreset = (i: number, fn: (p: Preset) => Preset) =>
     setPresets((prev) => prev.map((p, j) => (j === i ? fn(p) : p)));
 
+  // Remember the session for next time.
+  useEffect(() => savePresets(presets, selected), [presets, selected]);
+
   // Download and validate a .nam; store the parsed JSON on the block or report why not.
-  const checkNam = async (i: number, model: Model) => {
-    setChecking(true);
+  const checkNam = async (i: number, kind: NamKind, model: Model) => {
+    setCheckCount((c) => c + 1);
     setError(null);
     try {
       const res = await t3kClient.fetchFile(model.model_url);
       if (!res.ok) throw new Error(`Download failed: ${res.status}`);
       const { namJson, numWeights, architecture } = analyzeNamFile(await res.text());
       if (!isPedalCompatible(numWeights)) {
-        throw new Error(`${architecture} model with ${numWeights} weights. The pedal runs A2 nano models only (${PEDAL_WEIGHT_COUNT} weights).`);
+        throw new Error(`${architecture} model with ${numWeights} weights. The pedal runs A2-Lite models only (${PEDAL_WEIGHT_COUNT} weights).`);
       }
-      updatePreset(i, (p) => (p.nam?.model.id === model.id ? { ...p, nam: { ...p.nam, namJson } } : p));
+      updatePreset(i, (p) => (p[kind]?.model.id === model.id ? { ...p, [kind]: { ...p[kind]!, namJson } } : p));
     } catch (err) {
       setError(`${model.name}: ${(err as Error).message}`);
     } finally {
-      setChecking(false);
+      setCheckCount((c) => c - 1);
+    }
+  };
+
+  // Re-validate every NAM block that has no parsed .nam yet (restored or synced).
+  const checkPending = (list: Preset[]) => {
+    list.forEach((p, i) => {
+      for (const kind of ['nam', 'nam2'] as const) {
+        const b = p[kind];
+        if (b && b.namJson == null) checkNam(i, kind, b.model);
+      }
+    });
+  };
+
+  // Read the bank directory off the plugged-in pedal and rebuild the presets from it.
+  const syncFromPedal = async () => {
+    setError(null);
+    setNotice(null);
+    setSyncing(true);
+    try {
+      const bank = await readBankDirectory();
+      const { presets: synced, selected: current, warnings } = await resolvePedalBank(bank, t3kClient);
+      setPresets(synced);
+      setSelected(current);
+      setBlock('nam');
+      checkPending(synced);
+      if (warnings.length) setNotice(`Synced from pedal. ${warnings.join(' ')}`);
+    } catch (err) {
+      if ((err as DOMException)?.name !== 'NotFoundError') setError(`Sync failed: ${(err as Error).message}`);
+    } finally {
+      setSyncing(false);
     }
   };
 
   const setModel = (model: Model) => {
     const i = selected;
-    if (block === 'nam') {
-      updatePreset(i, (p) => (p.nam ? { ...p, nam: { ...p.nam, model, namJson: null } } : p));
-      checkNam(i, model);
+    if (isNamKind(block)) {
+      updatePreset(i, (p) => (p[block] ? { ...p, [block]: { ...p[block]!, model, namJson: null } } : p));
+      checkNam(i, block, model);
     } else {
       updatePreset(i, (p) => (p.ir ? { ...p, ir: { ...p.ir, model } } : p));
     }
@@ -98,6 +146,11 @@ export default function App() {
     if (!t3kClient.isConnected()) return;
     t3kClient.getUser().then(setUser).catch(() => t3kClient.clearTokens());
   }, []);
+
+  // Once in, fetch the .nam files for the presets restored from localStorage.
+  useEffect(() => {
+    if (entered) checkPending(presets);
+  }, [entered]);
 
   useEffect(() => {
     const onMessage = async (event: MessageEvent) => {
@@ -114,22 +167,27 @@ export default function App() {
       if (!user) t3kClient.getUser().then(setUser).catch(() => {});
       if (result.canceled || !result.toneId) return;
 
-      const { preset: i, kind } = target.current;
+      const { preset: i, slot } = target.current;
       setLoading(true);
       try {
         const [tone, list] = await Promise.all([
           t3kClient.getTone(result.toneId),
           t3kClient.listModels(result.toneId),
         ]);
-        const models = list.data.filter(kind === 'nam' ? isNamFile : isIrFile);
-        if (models.length === 0) throw new Error(kind === 'nam' ? 'No A2 models in this tone.' : 'No IR files in this tone.');
+        // Slot 2 accepts either format; the tone's files decide which block it becomes.
+        const nams = list.data.filter(isNamFile);
+        const irs = slot === 2 ? list.data.filter(isIrFile) : [];
+        const kind: BlockKind = nams.length ? (slot === 1 ? 'nam' : 'nam2') : 'ir';
+        const models = kind === 'ir' ? irs : nams;
+        if (models.length === 0) throw new Error(slot === 1 ? 'No A2 models in this tone.' : 'No A2 models or IR files in this tone.');
         const blk = { tone, models, model: models[0] };
-        if (kind === 'nam') {
-          updatePreset(i, (p) => ({ ...p, nam: { ...blk, namJson: null } }));
+        if (isNamKind(kind)) {
+          // Slot 2 holds one block: a new NAM replaces any IR, and vice versa.
+          updatePreset(i, (p) => ({ ...p, ir: kind === 'nam2' ? null : p.ir, [kind]: { ...blk, namJson: null } }));
           setLoading(false);
-          await checkNam(i, models[0]);
+          await checkNam(i, kind, models[0]);
         } else {
-          updatePreset(i, (p) => ({ ...p, ir: blk }));
+          updatePreset(i, (p) => ({ ...p, nam2: null, ir: blk }));
         }
         setBlock(kind);
       } catch (err) {
@@ -167,15 +225,16 @@ export default function App() {
   };
   const signedIn = !!user || t3kClient.isConnected();
   const enter = () => (signedIn ? setEntered(true) : open(LOGIN_OPTIONS));
-  const select = (kind: BlockKind) => {
-    target.current = { preset: selected, kind };
-    open(SELECT_OPTIONS[kind]);
+  const select = (slot: Slot) => {
+    target.current = { preset: selected, slot };
+    open(SELECT_OPTIONS[slot]);
   };
   const remove = (kind: BlockKind) => updatePreset(selected, (p) => ({ ...p, [kind]: null }));
 
   const preset = presets[selected];
-  const detail = preset[block] ?? preset.nam ?? preset.ir;
-  const detailKind: BlockKind = detail === preset.nam ? 'nam' : 'ir';
+  // Show the chosen block, else fall back to whatever is assigned (block 1 first).
+  const detailKind: BlockKind = (preset[block] ? block : KINDS.find((k) => preset[k])) ?? 'nam';
+  const detail = preset[detailKind];
 
   return (
     <>
@@ -185,6 +244,14 @@ export default function App() {
         <div className="banner banner-error banner-top">
           <span>{error}</span>
           <button className="btn-icon plain" onClick={() => setError(null)} aria-label="Dismiss">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="banner banner-top">
+          <span>{notice}</span>
+          <button className="btn-icon plain" onClick={() => setNotice(null)} aria-label="Dismiss">
             <X size={14} />
           </button>
         </div>
@@ -212,11 +279,13 @@ export default function App() {
           <Pedal
             presets={presets}
             selected={selected}
+            syncing={syncing}
             onSelect={(i) => {
               setSelected(i);
               setBlock('nam');
             }}
             onFlash={() => setFlashOpen(true)}
+            onSync={syncFromPedal}
           />
         </main>
       )}

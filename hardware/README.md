@@ -133,6 +133,9 @@ Blender -b -P renders/src/anim.py -- --out renders/out/anim
 ffmpeg -framerate 30 -i renders/out/anim/f_%04d.png \
   -vf "fade=t=in:st=0:d=0.5,fade=t=out:st=35.8:d=0.7,format=yuv420p" \
   -c:v libx264 -preset slow -crf 22 -movflags +faststart -an renders/build-animation-1080p.mp4
+
+# companion-app sprites (knob, bezel + LED off/lit, face.json) -> app/src/assets/pedal
+Blender -b -P renders/src/app_face.py
 ```
 
 `renders/src/wires.py` holds the off-board wiring as 3D polylines (used by both the wiring stills and the animation);

@@ -8,6 +8,34 @@
 // to D15..D30 (header = D + 7).
 
 namespace t3k_pedal {
+
+// ── Analog level reference ────────────────────────────────────────────────
+//
+// The input "calibration value" in the TONE3000 sense: the level at the
+// input jack that reaches 0 dBFS at the converter, in dBu. On an audio
+// interface this is a user setting (max input level at minimum gain); on the
+// T3K Pedal the whole analog path is known, so it is a constant.
+//
+// Derivation (hardware/pcb schematic, Daisy Seed3 datasheet v2.1.0, TI
+// TAC5242 datasheet):
+//   jack -> C2/R1 -> 2.5 V bias (R2/R3) -> U1A TL072 unity buffer
+//        -> RV7 10k trimmer (fully up: unity) -> Seed3 AUDIO_IN_1
+//        -> TAC5242, pin-strapped single-ended AC-coupled (MD5=1, MD4=0):
+//           full scale = 1.0 Vrms  ("0 dBFS @ 1 Vrms" in the Seed3 datasheet)
+//   0 dBFS = 1.0 Vrms at the jack = 20·log10(1.0 / 0.775) = +2.2 dBu
+//
+// Assumes RV7 fully up. Every dB RV7 is backed off raises this value by a dB
+// (the captures then get hit that much softer than calibrated).
+//
+// Headroom note: U1A runs from the single +5 V rail, so the analog path
+// clips at roughly ±1 V peak (≈ 0.7 Vrms, −1 dBu), about 3 dB *below*
+// converter full scale. RV7 sits after the buffer and does not recover that.
+constexpr float kInputLevelDbu = 2.2f;
+
+// The output side is the mirror image: TAC5242 single-ended line-out,
+// 0 dBFS = 1.0 Vrms -> U1B unity buffer -> jack. Same number.
+constexpr float kOutputLevelDbu = 2.2f;
+
 class T3kPedal {
 public:
   enum Sw {
@@ -23,7 +51,7 @@ public:
     ROTARY_4 = 4  // header 5 (PC8)   net /ROTARY1  <- physical position 4
   };
 
-  // Index into the ADC channel array (see kKnobPins in NAMPedal.cpp),
+  // Index into the ADC channel array (see kKnobPins in t3k_pedal.cpp),
   // not a Seed pin number. kKnobPins must list pins in this same order.
   // Order follows the PCB: ADC_0..ADC_5 (header 22..27, seed::A0..A5).
   enum Knob {

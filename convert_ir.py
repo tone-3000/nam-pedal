@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-convert_ir.py — prepare a cabinet IR WAV for NAMPedal.
+convert_ir.py — prepare a cabinet IR WAV for the T3K Pedal.
 
 Pipeline:
   1. Resample to --rate if needed (scipy polyphase > numpy > pure-Python)

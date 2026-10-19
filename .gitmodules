@@ -1,0 +1,6 @@
+[submodule "embedded"]
+	path = embedded
+	url = https://github.com/tone-3000/embedded
+[submodule "libDaisy"]
+	path = libDaisy
+	url = https://github.com/electro-smith/libDaisy

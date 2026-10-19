@@ -1,50 +1,59 @@
-// Pedal panel: faceplate with the rotary preset knob and 4 red LEDs, plus the flash button.
+// Pedal panel: the rotary section of the pedal (band, bezels, LEDs, knob) plus the flash and sync buttons.
+//
+// The face is drawn flat (black, LED track left bare). The knob and one chrome bezel with its LED off / lit
+// are sprites rendered from the enclosure model by hardware/renders/src/app_face.py; face.json carries the
+// geometry in face millimetres, which is also the SVG unit here.
 import { useEffect, useRef, useState } from 'react';
-import { Zap } from 'lucide-react';
+import { Download, Zap } from 'lucide-react';
 import type { Preset } from '../lib/flash';
 import { isReady } from '../lib/flash';
+import { isWebSerialSupported } from '../lib/serial';
+import { Spinner } from './Spinner';
+import geom from '../assets/pedal/face.json';
+import knobUrl from '../assets/pedal/knob.webp';
+import bezelOffUrl from '../assets/pedal/bezel-off.webp';
+import bezelOnUrl from '../assets/pedal/bezel-on.webp';
 
-// Faceplate geometry in SVG units, after the pedal wireframe: an LED arc band over the knob.
-const VIEW_W = 300;
-const VIEW_H = 232;
-const CX = 150;
-const CY = 162;
-const BAND_OUTER = 134;
-const BAND_INNER = 100;
-const LED_R = 117;
-const LABEL_R = 146;
-const BOSS_R = 40;
-const POINTER_W = 34;
-const TIP = 95; // pointer reach from center, just short of the band's inner edge
-const TAIL = 58; // pointer overhang past the center
-const ANGLES = [-70, -24, 24, 70]; // degrees from 12 o'clock
-const SWEEP = 85; // drag limit past the end positions
+const { band, tiles } = geom;
+const [RX, RY] = geom.rotary.center;
+// Detents, degrees clockwise from 12 o'clock. Deliberately wider than the drill template
+// (±44° / ±15°, see face.json) so the four positions read clearly at panel size.
+const ANGLES = [-62, -21, 21, 62];
+const LED_R = (band.outer + band.inner) / 2; // LEDs sit on the band's centre line
+const SWEEP = 75; // drag limit past the end detents
 
-const polar = (r: number, deg: number) => {
+// Crop of the face shown in the panel (mm, template coordinates: origin top-left of the print, y down).
+const VX = 51;
+const VY = 47;
+const VW = 79.5;
+const VH = 60;
+
+const KNOB_HIT_R = 24; // grab disc; the bezels start ~27 mm from the axis
+const LED_HIT_R = 5;
+
+const LEDS = ANGLES.map((deg) => {
   const a = (deg * Math.PI) / 180;
-  return { x: CX + r * Math.sin(a), y: CY - r * Math.cos(a) };
-};
+  return { center: [RX + LED_R * Math.sin(a), RY - LED_R * Math.cos(a)] as const };
+});
 
 const nearest = (deg: number) =>
   ANGLES.reduce((best, a, i) => (Math.abs(a - deg) < Math.abs(ANGLES[best] - deg) ? i : best), 0);
 
-// Half annulus, flat ends on the knob's center line.
+// Half annulus, flat ends on the rotary centre line.
 const BAND_PATH = [
-  `M ${CX - BAND_OUTER} ${CY}`,
-  `A ${BAND_OUTER} ${BAND_OUTER} 0 0 1 ${CX + BAND_OUTER} ${CY}`,
-  `L ${CX + BAND_INNER} ${CY}`,
-  `A ${BAND_INNER} ${BAND_INNER} 0 0 0 ${CX - BAND_INNER} ${CY}`,
+  `M ${RX - band.outer} ${RY}`,
+  `A ${band.outer} ${band.outer} 0 0 1 ${RX + band.outer} ${RY}`,
+  `L ${RX + band.inner} ${RY}`,
+  `A ${band.inner} ${band.inner} 0 0 0 ${RX - band.inner} ${RY}`,
   'Z',
 ].join(' ');
 
-
 interface FaceProps {
   selected: number;
-  ready: boolean[];
   onSelect: (i: number) => void;
 }
 
-function Face({ selected, ready, onSelect }: FaceProps) {
+function Face({ selected, onSelect }: FaceProps) {
   const svg = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const angle = drag ?? ANGLES[selected];
@@ -53,11 +62,8 @@ function Face({ selected, ready, onSelect }: FaceProps) {
   useEffect(() => {
     if (drag === null) return;
     const onMove = (e: PointerEvent) => {
-      const r = svg.current!.getBoundingClientRect();
-      const s = r.width / VIEW_W;
-      const dx = e.clientX - (r.left + CX * s);
-      const dy = e.clientY - (r.top + CY * s);
-      const a = Math.max(-SWEEP, Math.min(SWEEP, (Math.atan2(dx, -dy) * 180) / Math.PI));
+      const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.current!.getScreenCTM()!.inverse());
+      const a = Math.max(-SWEEP, Math.min(SWEEP, (Math.atan2(p.x - RX, RY - p.y) * 180) / Math.PI));
       setDrag(a);
       const i = nearest(a);
       if (i !== selected) onSelect(i);
@@ -73,39 +79,56 @@ function Face({ selected, ready, onSelect }: FaceProps) {
     };
   }, [drag, selected, onSelect]);
 
+  const half = tiles.bezel / 2;
+  const kh = tiles.knob / 2;
+
   return (
-    <svg ref={svg} className="face" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="group" aria-label="Preset selector">
-      <rect width={VIEW_W} height={VIEW_H} rx={14} className="face-bg" />
-      <image href="/brand/t3k.svg" x={16} y={16} height={12} />
-      <path d={BAND_PATH} className="face-band" />
-      {ANGLES.map((deg, i) => {
-        const led = polar(LED_R, deg);
-        const label = polar(LABEL_R, deg);
+    <svg ref={svg} className="face" viewBox={`${VX} ${VY} ${VW} ${VH}`} role="group" aria-label="Preset selector">
+      <defs>
+        <filter id="knob-shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0.3" dy="0.9" stdDeviation="0.7" floodColor="#000" floodOpacity="0.55" />
+        </filter>
+      </defs>
+
+      <rect x={VX} y={VY} width={VW} height={VH} className="face-ink" />
+      <path d={BAND_PATH} className="face-alu" />
+
+      {LEDS.map((led, i) => {
+        const [x, y] = led.center;
         const on = i === selected;
         return (
-          <g key={i} className="hit" onClick={() => onSelect(i)} role="button" aria-label={`Preset ${i + 1}`}>
-            <circle cx={led.x} cy={led.y} r={16} fill="transparent" />
-            <circle cx={led.x} cy={led.y} r={7} className={`led${on ? ' on' : ''}`} />
-            <text x={label.x} y={label.y + 4} className={`led-label${ready[i] ? ' ready' : ''}`}>
-              {i + 1}
-            </text>
+          <g key={i} className="face-hit" role="button" aria-label={`Preset ${i + 1}`} aria-pressed={on} onClick={() => onSelect(i)}>
+            <image href={bezelOffUrl} x={x - half} y={y - half} width={tiles.bezel} height={tiles.bezel} />
+            <image href={bezelOnUrl} x={x - half} y={y - half} width={tiles.bezel} height={tiles.bezel} className={`face-lit${on ? ' on' : ''}`} />
+            <circle cx={x} cy={y} r={LED_HIT_R} fill="transparent" />
           </g>
         );
       })}
-      <g
-        className={`knob${drag !== null ? ' dragging' : ''}`}
+
+      <g filter="url(#knob-shadow)">
+        <image
+          href={knobUrl}
+          x={RX - kh}
+          y={RY - kh}
+          width={tiles.knob}
+          height={tiles.knob}
+          className={`face-knob-img${drag !== null ? ' dragging' : ''}`}
+          style={{ transform: `rotate(${angle - geom.rotary.modelAngle}deg)`, transformOrigin: `${RX}px ${RY}px` }}
+        />
+      </g>
+      <circle
+        cx={RX}
+        cy={RY}
+        r={KNOB_HIT_R}
+        fill="transparent"
+        className={`face-knob${drag !== null ? ' dragging' : ''}`}
         role="slider"
         aria-label="Preset knob"
         aria-valuemin={1}
         aria-valuemax={ANGLES.length}
         aria-valuenow={selected + 1}
-        transform={`rotate(${angle} ${CX} ${CY})`}
         onPointerDown={() => setDrag(angle)}
-      >
-        <circle cx={CX} cy={CY} r={BOSS_R} className="knob-body" />
-        <rect x={CX - POINTER_W / 2} y={CY - TIP} width={POINTER_W} height={TIP + TAIL} rx={10} className="knob-body" />
-        <rect x={CX - 2.5} y={CY - TIP + 8} width={5} height={30} rx={2.5} className="knob-stripe" />
-      </g>
+      />
     </svg>
   );
 }
@@ -113,13 +136,15 @@ function Face({ selected, ready, onSelect }: FaceProps) {
 interface Props {
   presets: Preset[];
   selected: number;
+  syncing: boolean;
   onSelect: (i: number) => void;
   onFlash: () => void;
+  onSync: () => void;
 }
 
-export function Pedal({ presets, selected, onSelect, onFlash }: Props) {
-  const ready = presets.map(isReady);
-  const count = ready.filter(Boolean).length;
+export function Pedal({ presets, selected, syncing, onSelect, onFlash, onSync }: Props) {
+  const count = presets.filter(isReady).length;
+  const canSync = isWebSerialSupported();
 
   return (
     <aside className="card">
@@ -127,10 +152,19 @@ export function Pedal({ presets, selected, onSelect, onFlash }: Props) {
         <span className="label">Pedal</span>
         <span className="label">{count}/{presets.length}</span>
       </div>
-      <Face selected={selected} ready={ready} onSelect={onSelect} />
-      <button className="btn btn-primary btn-block pedal-flash" disabled={count === 0} onClick={onFlash}>
+      <Face selected={selected} onSelect={onSelect} />
+      <button className="btn btn-primary btn-block pedal-flash" disabled={count === 0 || syncing} onClick={onFlash}>
         <Zap size={14} />
         Flash to pedal
+      </button>
+      <button
+        className="btn btn-block pedal-sync"
+        disabled={!canSync || syncing}
+        onClick={onSync}
+        title={canSync ? 'Load the presets currently on the plugged-in pedal' : 'Web Serial is not supported in this browser; use Chrome or Edge.'}
+      >
+        {syncing ? <Spinner /> : <Download size={14} />}
+        {syncing ? 'Reading pedal' : 'Sync from pedal'}
       </button>
     </aside>
   );

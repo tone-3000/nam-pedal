@@ -250,9 +250,10 @@ h1, h2, h3, p { margin: 0; }
   width: 76px;
   background: var(--text);
 }
-.tile-add-nam::before { right: 0; }
-.tile-add-ir::before { left: 0; }
+.tile-add-1::before { right: 0; }
+.tile-add-2::before { left: 0; }
 .tile-add svg { position: relative; }
+.pedal-sync { margin-top: 8px; }
 
 /* Block detail */
 .detail {
@@ -330,19 +331,28 @@ h1, h2, h3, p { margin: 0; }
 /* WASM preview button lives inside this wrapper so its scoped styles apply */
 .neural-amp-modeler { display: flex; }
 
-/* Pedal faceplate */
-.face { display: block; width: 100%; height: auto; margin-bottom: 16px; touch-action: none; }
-.face-bg { fill: var(--bg); }
-.face-band { fill: var(--text); stroke: var(--bg); stroke-width: 2; }
-.face .hit { cursor: pointer; }
-.led { fill: var(--text); stroke: var(--bg); stroke-width: 2; }
-.led.on { fill: var(--red); }
-.led-label { font: 700 11px var(--mono); fill: var(--subtle); text-anchor: middle; }
-.led-label.ready { fill: var(--text); }
-.knob { cursor: grab; }
-.knob.dragging { cursor: grabbing; }
-.knob-body { fill: var(--text); stroke: var(--bg); stroke-width: 2; }
-.knob-stripe { fill: var(--bg); }
+/* Pedal faceplate: flat face drawn in face millimetres, with rendered knob and bezel sprites
+   on top (see components/Pedal.tsx) */
+.face {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.face-alu { fill: #e1e2e4; }
+.face-ink { fill: var(--bg); }
+.face-hit { cursor: pointer; }
+.face-hit image { pointer-events: none; }
+.face-lit { opacity: 0; transition: opacity 0.1s; }
+.face-lit.on { opacity: 1; }
+.face-knob-img { transition: transform 0.15s ease-out; pointer-events: none; }
+.face-knob-img.dragging { transition: none; }
+.face-knob { cursor: grab; }
+.face-knob.dragging { cursor: grabbing; }
 .pedal-flash { margin-top: auto; }
 
 /* Dialog */

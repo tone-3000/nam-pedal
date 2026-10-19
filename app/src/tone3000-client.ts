@@ -215,6 +215,13 @@ export class T3KClient {
     return res.json();
   }
 
+  /** A single model by id; its tone_id leads back to the tone and its sibling models. */
+  async getModel(id: number | string): Promise<Model> {
+    const res = await this.fetch(`/api/v1/models/${id}`);
+    if (!res.ok) throw new Error(`getModel failed: ${res.status}`);
+    return res.json();
+  }
+
   // The pedal runs A2 only. IR files have no architecture and pass through the filter.
   async listModels(toneId: number | string): Promise<PaginatedResponse<Model>> {
     const qs = new URLSearchParams({ tone_id: String(toneId), architecture: '2' });
