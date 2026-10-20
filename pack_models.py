@@ -1,35 +1,48 @@
 #!/usr/bin/env python3
 """
-pack_models.py — pack .namb model files (+ optional cabinet IRs) into a
-NAMPedal model bank.
+pack_models.py — pack presets for the TONE3000 × Daisy DIY Pedal (T3K Pedal)
+into a bank image.  Command-line counterpart of the companion app (app/).
 
-The bank is written to a fixed QSPI flash region (default 0x90800000),
-completely independent of the firmware binary.  Models can be swapped by
+The bank is written to a fixed QSPI flash region (default 0x90600000),
+completely independent of the firmware binary.  Presets can be swapped by
 reflashing only the bank; the firmware image is never touched.
 
+Each preset is one or two blocks:
+  block 1  an A2-Lite NAM capture
+  block 2  another A2-Lite capture (e.g. a pedal into an amp), or a cab IR
+
 Usage:
-  pack_models.py [options] NAME:MODEL[:IR] [NAME:MODEL[:IR] ...]
+  pack_models.py [options] NAME:NAM[:NAM2|IR] [NAME:NAM[:NAM2|IR] ...]
 
   NAME   display name stored in the bank (max 31 chars)
-  MODEL  path to a .namb model file, or a .nam file (plain WaveNet or
+  NAM    path to a .namb file, or a .nam file (plain WaveNet or
          SlimmableContainer — converted automatically via nam2namb)
-  IR     optional path to a cabinet IR WAV file
+  NAM2   optional second capture (.nam / .namb), run after the first
+  IR     optional cabinet IR WAV file instead of NAM2
          (PCM 16/24/32-bit or IEEE float 32-bit, mono or multi-channel)
          Only channel 0 is used.  IR is truncated to MAX_IR_TAPS samples
          (256 taps ≈ 5.3 ms @ 48 kHz).
+
+  A file may carry its TONE3000 model id as `path@ID` (e.g. amp.nam@476289).
+  The id is stored in the bank so the companion app's "Sync from pedal" can
+  find the tone again; it is otherwise unused.
 
 Options:
   -o FILE       Output file (default: model_bank.bin)
   --slim FLOAT  Slim factor for SlimmableContainer .nam files (default: 0.0).
                 Selects the first submodel whose max_value > FLOAT, giving
-                the smallest model for values near 0.
+                the smallest model (A2-Lite) for values near 0.
   --flash       Flash the bank to a connected Daisy (requires: pip install pyusb)
   --port PORT   Serial port of the running pedal (e.g. /dev/tty.usbmodemXXXX).
                 When given, sends a DFU trigger byte over USB CDC so the pedal
                 resets into DFU mode automatically before flashing.
                 Without --port the Daisy must already be in DFU mode.
   --addr ADDR   Target flash address in hex (default: 0x90600000)
-  --list FILE   List models stored in an existing bank file and exit
+  --list FILE   List presets stored in an existing bank file and exit
+  --dump        Ask the running pedal (--port) for its bank directory and exit.
+                Same data the app's "Sync from pedal" reads: names, block
+                kinds and TONE3000 model ids.  Needs firmware with the 'B'
+                serial command.
 
 Requires the Daisy bootloader (BOOT_QSPI firmware target).
 Flashing uses pydfu.py (MIT) vendored alongside this script.
@@ -37,9 +50,11 @@ Flashing uses pydfu.py (MIT) vendored alongside this script.
 
 Examples:
   pack_models.py --flash --port /dev/tty.usbmodem0001 "TonePlier:tone_plier.nam:mesa_cab.wav"
-  pack_models.py --slim 0.0 "Amp1:model1.nam" "Amp2:model2.nam:cab.wav"
+  pack_models.py "Amp1:model1.nam" "Amp2:model2.nam:cab.wav" "OD > Amp:od808.nam:amp.nam"
   pack_models.py -o bank.bin Fender:clean.namb:twin_reverb.wav
+  pack_models.py "Plexi:plexi.nam@476289:cab.wav@12345"
   pack_models.py --list model_bank.bin
+  pack_models.py --dump --port /dev/tty.usbmodem0001
 """
 
 import argparse
@@ -52,11 +67,11 @@ import tempfile
 import time
 
 BANK_MAGIC   = 0x504D414E  # "NAMP"
-BANK_VERSION = 1
+BANK_VERSION = 2
 HEADER_SIZE  = 64          # bytes
-ENTRY_SIZE   = 48          # name(32) + namb_offset(4) + namb_size(4) + ir_offset(4) + ir_num_samples(4)
+ENTRY_SIZE   = 64          # name(32) + nam offset/size + nam2 offset/size + ir offset/num_samples + 2 model ids
 NAMB_MAGIC   = 0x4E414D42  # "NAMB"
-MAX_IR_TAPS  = 256         # must match MAX_IR_TAPS in NAMPedal.cpp
+MAX_IR_TAPS  = 256         # must match MAX_IR_TAPS in t3k_pedal.cpp
 
 
 # ── WAV reader ────────────────────────────────────────────────────────────
@@ -308,49 +323,48 @@ def read_model(path, slim_factor=0.0):
 
 # ── Bundle builder ────────────────────────────────────────────────────────
 
-def build_bank(models):
-    """Pack models into a binary bank.
+def build_bank(presets):
+    """Pack presets into a binary bank.
 
-    models: list of (name: str, namb: bytes, ir: bytes | None)
+    presets: list of (name: str, namb: bytes, namb2: bytes | None, ir: bytes | None,
+                      nam_model_id: int, block2_model_id: int)
+             namb2 (second capture) and ir are mutually exclusive.  The model
+             ids are TONE3000 ids for the app's "Sync from pedal" (0 = unknown).
     Returns: bytes
     """
-    n = len(models)
-    data_base = HEADER_SIZE + n * ENTRY_SIZE
+    n = len(presets)
+    cur = HEADER_SIZE + n * ENTRY_SIZE
 
-    # Compute blob offsets (namb then optional IR per model, 4-byte aligned).
-    namb_offsets = []
-    ir_offsets   = []
-    cur = data_base
-    for _name, namb, ir in models:
-        namb_offsets.append(cur)
-        cur += len(namb)
-        cur = (cur + 3) & ~3
-        if ir is not None:
-            ir_offsets.append(cur)
-            cur += len(ir)
-            cur = (cur + 3) & ~3
-        else:
-            ir_offsets.append(0)
+    # Lay out the blobs in order (namb, namb2, ir per preset), 4-byte aligned.
+    # offsets[i] = (namb_offset, namb2_offset, ir_offset), 0 where absent.
+    offsets = []
+    blobs = b''
+    for _name, namb, namb2, ir, _id1, _id2 in presets:
+        row = []
+        for blob in (namb, namb2, ir):
+            if blob is None or len(blob) == 0:
+                row.append(0)
+                continue
+            row.append(cur)
+            pad = (4 - len(blob) % 4) % 4
+            blobs += blob + b'\x00' * pad
+            cur += len(blob) + pad
+        offsets.append(row)
 
-    # Header: magic(4) version(4) num_models(4) + padding to 64 bytes.
+    # Header: magic(4) version(4) num_presets(4) + padding to 64 bytes.
     hdr = struct.pack('<III', BANK_MAGIC, BANK_VERSION, n).ljust(HEADER_SIZE, b'\x00')
 
-    # Entries: name(32) namb_offset(4) namb_size(4) ir_offset(4) ir_num_samples(4).
+    # Entries: name(32) nam_offset nam_size nam2_offset nam2_size ir_offset
+    # ir_num_samples nam_model_id block2_model_id.
     entries = b''
-    for i, (name, namb, ir) in enumerate(models):
+    for (name, namb, namb2, ir, id1, id2), (off1, off2, off_ir) in zip(presets, offsets):
         name_b = name.encode('ascii', errors='replace')[:31].ljust(32, b'\x00')
-        ir_num = len(ir) // 4 if ir is not None else 0
-        entries += name_b + struct.pack('<IIII',
-                                       namb_offsets[i], len(namb),
-                                       ir_offsets[i],   ir_num)
+        entries += name_b + struct.pack('<IIIIIIII',
+                                       off1,   len(namb),
+                                       off2,   len(namb2) if namb2 else 0,
+                                       off_ir, len(ir) // 4 if ir else 0,
+                                       id1 & 0xFFFFFFFF, id2 & 0xFFFFFFFF)
     assert len(entries) == n * ENTRY_SIZE
-
-    # Data blobs (4-byte aligned padding between them).
-    blobs = b''
-    for _name, namb, ir in models:
-        blobs += namb + b'\x00' * ((4 - len(namb) % 4) % 4)
-        if ir is not None:
-            blobs += ir + b'\x00' * ((4 - len(ir) % 4) % 4)
 
     return hdr + entries + blobs
 
@@ -366,15 +380,55 @@ def list_bank(path):
         sys.exit('error: file too small to be a model bank')
     magic, version, n = struct.unpack_from('<III', raw, 0)
     if magic != BANK_MAGIC:
-        sys.exit(f'error: not a model bank (magic=0x{magic:08X})')
-    print(f'Model bank v{version}: {n} model(s), {len(raw)} bytes total')
+        sys.exit(f'error: not a preset bank (magic=0x{magic:08X})')
+    if version != BANK_VERSION:
+        sys.exit(f'error: bank version {version}, this tool reads version {BANK_VERSION}')
+    print(f'Preset bank v{version}: {n} preset(s), {len(raw)} bytes total')
+    model = lambda mid: f' (model {mid})' if mid else ''
     for i in range(n):
         base = HEADER_SIZE + i * ENTRY_SIZE
         name = raw[base:base + 32].split(b'\x00')[0].decode('ascii', errors='replace')
-        namb_off, namb_sz, ir_off, ir_num = struct.unpack_from('<IIII', raw, base + 32)
-        ir_str = (f'IR {ir_num} taps ({ir_num / 48.0:.1f} ms)' if ir_num
-                  else 'no IR')
-        print(f'  [{i + 1}] "{name}"  .namb {namb_sz} B  {ir_str}')
+        _, nam_sz, _, nam2_sz, _, ir_num, id1, id2 = struct.unpack_from('<IIIIIIII', raw, base + 32)
+        if nam_sz == 0:
+            print(f'  [{i + 1}] (empty)')
+            continue
+        if nam2_sz:
+            block2 = f'NAM {nam2_sz} B{model(id2)}'
+        elif ir_num:
+            block2 = f'IR {ir_num} taps ({ir_num / 48.0:.1f} ms){model(id2)}'
+        else:
+            block2 = 'none'
+        print(f'  [{i + 1}] "{name}"  NAM {nam_sz} B{model(id1)}  block 2: {block2}')
+
+
+def dump_pedal(port, timeout=3.0):
+    """Ask the running firmware ('B') for its bank directory and print it."""
+    try:
+        import serial
+    except ImportError:
+        sys.exit('error: pyserial is required for --port  (pip install pyserial)')
+    try:
+        s = serial.Serial(port, baudrate=115200, timeout=0.2)
+    except Exception as e:
+        sys.exit(f'error: could not open {port}: {e}')
+    with s:
+        s.dtr = True
+        time.sleep(0.2)
+        s.reset_input_buffer()
+        s.write(b'B')
+        s.flush()
+        buf = b''
+        deadline = time.monotonic() + timeout
+        while b'T3K-BANK-END' not in buf and time.monotonic() < deadline:
+            buf += s.read(512)
+    text = buf.decode('ascii', errors='replace')
+    begin, end = text.find('T3K-BANK-BEGIN'), text.find('T3K-BANK-END')
+    if begin < 0 or end < 0:
+        sys.exit("error: no reply from the pedal; its firmware needs the 'B' command "
+                 '(rebuild and reflash from this repo)')
+    for line in text[begin + len('T3K-BANK-BEGIN'):end].splitlines():
+        if line.strip():
+            print(line.strip())
 
 
 # ── Flasher ───────────────────────────────────────────────────────────────
@@ -433,7 +487,7 @@ def flash(path, addr, dfu_timeout=15.0):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('models', nargs='*', metavar='NAME:MODEL[:IR]')
+    p.add_argument('presets', nargs='*', metavar='NAME:NAM[:NAM2|IR]')
     p.add_argument('-o', '--output', default='model_bank.bin', metavar='FILE')
     p.add_argument('--slim', type=float, default=0.0, metavar='FLOAT',
                    help='slim factor for SlimmableContainer .nam files (default: 0.0)')
@@ -445,46 +499,69 @@ def main():
                    type=lambda x: int(x, 16), metavar='ADDR',
                    help='target flash address in hex (default: 0x90600000)')
     p.add_argument('--list', metavar='FILE',
-                   help='list models in an existing bank and exit')
+                   help='list presets in an existing bank and exit')
+    p.add_argument('--dump', action='store_true',
+                   help='print the bank directory of the pedal on --port and exit')
     args = p.parse_args()
 
     if args.list:
         list_bank(os.path.expanduser(args.list))
         return
+    if args.dump:
+        if not args.port:
+            sys.exit('error: --dump needs --port /dev/tty.usbmodemXXXX')
+        dump_pedal(args.port)
+        return
 
-    if not args.models:
+    if not args.presets:
         p.print_help()
         sys.exit(1)
 
-    models = []
-    for spec in args.models:
+    def split_id(part):
+        """'path@ID' -> (path, ID); plain 'path' -> (path, 0)."""
+        path, sep, mid = part.rpartition('@')
+        if sep and mid.isdigit():
+            return os.path.expanduser(path), int(mid)
+        return os.path.expanduser(part), 0
+
+    presets = []
+    for spec in args.presets:
         parts = spec.split(':')
         if len(parts) < 2 or len(parts) > 3:
-            sys.exit(f"error: expected NAME:MODEL[:IR], got '{spec}'")
+            sys.exit(f"error: expected NAME:NAM[:NAM2|IR], got '{spec}'")
         name = parts[0].strip()
         if not name:
             sys.exit(f"error: empty name in '{spec}'")
 
-        model_path = os.path.expanduser(parts[1])
+        model_path, id1 = split_id(parts[1])
         namb = read_model(model_path, slim_factor=args.slim)
-        print(f'  [{len(models) + 1}] {name}: {model_path} ({len(namb)} bytes)')
+        print(f'  [{len(presets) + 1}] {name}: {model_path} ({len(namb)} bytes)'
+              + (f'  model {id1}' if id1 else ''))
 
-        ir_bytes = None
+        # Block 2: a second capture or a cabinet IR, told apart by extension.
+        namb2 = ir_bytes = None
+        id2 = 0
         if len(parts) == 3:
-            ir_path = os.path.expanduser(parts[2])
-            ir_samples, sr = read_wav_mono_f32(ir_path)
-            print(f'       IR: {ir_path} ({len(ir_samples)} taps @ {sr} Hz)')
-            ir_samples = process_ir(ir_samples, sr)
-            ir_bytes = struct.pack(f'<{len(ir_samples)}f', *ir_samples)
+            path2, id2 = split_id(parts[2])
+            if path2.lower().endswith('.wav'):
+                ir_samples, sr = read_wav_mono_f32(path2)
+                print(f'       IR: {path2} ({len(ir_samples)} taps @ {sr} Hz)')
+                ir_samples = process_ir(ir_samples, sr)
+                ir_bytes = struct.pack(f'<{len(ir_samples)}f', *ir_samples)
+            else:
+                namb2 = read_model(path2, slim_factor=args.slim)
+                print(f'       NAM 2: {path2} ({len(namb2)} bytes)')
+            if id2:
+                print(f'       model {id2}')
 
-        models.append((name, namb, ir_bytes))
+        presets.append((name, namb, namb2, ir_bytes, id1, id2))
 
-    bank = build_bank(models)
+    bank = build_bank(presets)
     output_path = os.path.expanduser(args.output)
     with open(output_path, 'wb') as f:
         f.write(bank)
     print(f'wrote {len(bank)} bytes → {output_path}  '
-          f'({len(models)} model(s) at 0x{args.addr:08X})')
+          f'({len(presets)} preset(s) at 0x{args.addr:08X})')
 
     if args.flash:
         if args.port:

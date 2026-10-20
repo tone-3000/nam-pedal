@@ -1,0 +1,198 @@
+(footprint "Rotary Switch 3 Pole 4 Position ALPHA SR2511F"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at -4 4.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "906b7694-2ee7-46c9-9d7c-356cc808faad")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "SW_Rotary_1x4_MP"
+		(at 0 1 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "856b860b-9756-418f-a2a2-7cfea585579a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "68f75313-d41b-4378-a4ad-d52839efd498")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" "Rotary switch 1x4, SP4T with mount point"
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "e881bd65-39c0-458b-9e35-3733cfff2125")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(sheetname "/")
+	(sheetfile "nam-pedal-diy.kicad_sch")
+	(clearance 0.25)
+	(attr through_hole)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_text user "4"
+		(at -5.35 1.1 180)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "9843320e-42a9-4011-b547-79799207cee3")
+		(effects
+			(font
+				(size 1.016 1)
+				(thickness 0.1524)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "3"
+		(at -2.35 1.1 180)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "b667d10f-29f5-4168-bf53-2c5266bfe5de")
+		(effects
+			(font
+				(size 1.016 1)
+				(thickness 0.1524)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "2"
+		(at 0.65 1.1 180)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "c9cc9268-a77f-4a66-9f49-178443487751")
+		(effects
+			(font
+				(size 1.016 1)
+				(thickness 0.1524)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "1"
+		(at 3.65 1.1 180)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "7727e4ec-a0d9-4dbe-9a7a-e5d3442e9f83")
+		(effects
+			(font
+				(size 1.016 1)
+				(thickness 0.1524)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "Rotary Switch"
+		(at 6.35 3.1 180)
+		(unlocked yes)
+		(layer "F.SilkS" knockout)
+		(uuid "278fdad7-1dec-4204-a812-d9dd617fbcbf")
+		(effects
+			(font
+				(size 1.2 1.2)
+				(thickness 0.2)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "T"
+		(at 6.45 1.1 180)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "9e661205-ca58-4664-bbbe-78f4875fcc6a")
+		(effects
+			(font
+				(size 1.016 1)
+				(thickness 0.1524)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 2.5 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "26a450d0-a604-4861-9623-02394d4b27be")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" thru_hole rect
+		(at -6 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "63927392-bfee-4482-963e-ce2b50c61f77")
+	)
+	(pad "2" thru_hole roundrect
+		(at -3 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15)
+		(uuid "8a2e34bb-ff37-493a-bccf-410548286af0")
+	)
+	(pad "3" thru_hole roundrect
+		(at 0 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15625)
+		(uuid "b7f21702-293a-4f74-aa0e-5c5e35183887")
+	)
+	(pad "4" thru_hole roundrect
+		(at 3 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15625)
+		(uuid "fe6c046c-ea91-4ec7-b292-b030c5c27a8b")
+	)
+	(pad "5" thru_hole roundrect
+		(at 6 0)
+		(size 1.6 1.6)
+		(drill 1.2)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15625)
+		(uuid "ac63ffcb-469d-4075-bfd5-3af1e7c5d2cd")
+	)
+	(embedded_fonts no)
+)

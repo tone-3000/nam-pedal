@@ -1,3 +1,8 @@
 .DS_Store
 build/
-model_data.h
+
+# regenerated 3D inputs for the renders (see hardware/README.md)
+hardware/enclosure/cad/enclosure.glb
+hardware/3d/board-full.glb
+hardware/renders/out/
+__pycache__/
