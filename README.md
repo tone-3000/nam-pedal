@@ -32,6 +32,7 @@ NeuralAmpModelerCore's at float32 rounding level (max abs error 2.4e-7, ESR −1
 | `.github/workflows/` | CI: firmware build and release binaries |
 | `libDaisy/` | Electrosmith libDaisy (submodule, pinned to a release) |
 | `embedded/` | A2-Lite engine and `.namb` reader (submodule) |
+| `daisyConvol/` | VZtec's partitioned convolver for cab IRs (submodule, pinned to v0.1.0) |
 | `app/` | Companion web app: TONE3000 login, preset builder, WebUSB flashing — see [`app/README.md`](app/README.md) |
 | `pack_models.py`, `convert_ir.py`, `pydfu.py` | Command-line preset bank builder and flasher |
 | `hardware/` | KiCad project, Gerbers, BOM, enclosure drill/print files, 3D models, renders — see [`hardware/README.md`](hardware/README.md) |
@@ -113,11 +114,16 @@ and EQ, zero overruns:
 | Preset | CPU |
 | --- | --- |
 | A2-Lite | ≈ 42 % |
-| A2-Lite + cab IR (256 taps) | ≈ 51 % |
+| A2-Lite + cab IR (4096 taps) | ≈ 54 % |
 | A2-Lite → A2-Lite | ≈ 83 % |
 
 Engine code runs from zero-wait ITCM (copied from QSPI at boot), captures and engine instances live in DTCM, the
 engine's ring buffers in AXI SRAM behind the D-cache. FPU flush-to-zero and default-NaN are enabled.
+
+Cab IRs run on [daisyConvol](https://github.com/VZtec/daisyConvol) (MIT, git submodule), a zero-latency
+non-uniform partitioned FFT convolver: 16-sample blocks (three per callback), partitions of 16 × 16 + 30 × 128
+samples for a 4096-sample IR. Its engine and the CMSIS-DSP FFT also run from ITCM, its per-block state and FFT
+tables live in DTCM, its stage-1 spectra and delay line (60 KB) in AXI SRAM.
 
 ## Building the firmware
 
@@ -134,8 +140,8 @@ cd NAMPedal
 make
 ```
 
-libDaisy and the A2 engine are git submodules pinned to releases (`libDaisy/` at v9.0.0, the first release that
-knows the Daisy Seed3; `embedded/`). The first `make` builds libDaisy's static library, after which only the
+libDaisy, the A2 engine and the IR convolver are git submodules pinned to releases (`libDaisy/` at v9.0.0, the
+first release that knows the Daisy Seed3; `embedded/`; `daisyConvol/` at v0.1.0). The first `make` builds libDaisy's static library, after which only the
 firmware rebuilds. If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive`.
 To build against a libDaisy checkout elsewhere, pass `LIBDAISY_DIR=/path/to/libDaisy`. `make libdaisy` rebuilds the
 library, `make clean-all` cleans both.
@@ -191,7 +197,7 @@ apart by extension. A file may carry its TONE3000 model id as `path@ID`; the id 
 **Sync from pedal** can find the tone again (without it the app leaves that block empty). `.nam`
 files are converted with `nam2namb` from [nam-binary-loader](https://github.com/tone-3000/nam-binary-loader);
 `--slim 0.0` selects the A2-Lite submodel of a slimmable `.nam`. IRs are resampled to 48 kHz, made minimum-phase,
-truncated to 256 taps with a Hann tail and peak normalized.
+truncated to 4096 taps (≈ 85 ms) with a Hann tail and peak normalized.
 
 Only A2-Lite captures are accepted (1 layer array, channels 3, 23 layers, 1871 weights). Every A2 download on
 TONE3000 contains A2-Lite, so any A2 capture in the library works; the firmware validates the `.namb` (CRC and

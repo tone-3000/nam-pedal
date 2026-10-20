@@ -13,9 +13,9 @@ Pipeline:
 Usage:
   python convert_ir.py INPUT.wav OUTPUT.wav [options]
 
-  --taps N        Target length in samples (default: 256, matches MAX_IR_TAPS)
+  --taps N        Target length in samples (default: 4096, matches kMaxIrLen)
   --rate HZ       Target sample rate in Hz (default: 48000)
-  --fade N        Hann tail applied to the last N samples (default: 64, ~25%)
+  --fade N        Hann tail applied to the last N samples (default: 256, ~5 ms)
   --no-min-phase  Skip minimum-phase conversion (not recommended)
   --no-normalize  Skip peak normalisation
   --eps FLOAT     Log-magnitude floor for min-phase cepstrum, relative to peak
@@ -250,12 +250,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('input',  help='Input IR WAV file')
     ap.add_argument('output', help='Output WAV file (float32 mono)')
-    ap.add_argument('--taps', type=int, default=256,
-                    help='Target length in taps (default: 256)')
+    ap.add_argument('--taps', type=int, default=4096,
+                    help='Target length in taps (default: 4096)')
     ap.add_argument('--rate', type=int, default=48000,
                     help='Target sample rate in Hz (default: 48000)')
-    ap.add_argument('--fade', type=int, default=64,
-                    help='Hann tail length in samples (default: 64, ~25%% of 256)')
+    ap.add_argument('--fade', type=int, default=256,
+                    help='Hann tail length in samples (default: 256, ~5 ms)')
     ap.add_argument('--no-min-phase', action='store_true',
                     help='Skip minimum-phase conversion')
     ap.add_argument('--no-normalize', action='store_true',

@@ -17,7 +17,7 @@ export const BANK_MAGIC = 0x504d414e; // "NAMP"
 export const BANK_VERSION = 2;
 export const HEADER_SIZE = 64;
 export const ENTRY_SIZE = 64;
-export const MAX_IR_TAPS = 256; // must match MAX_IR_TAPS in t3k_pedal.cpp
+export const MAX_IR_TAPS = 4096; // must match kMaxIrLen in t3k_pedal.cpp
 
 // QSPI flash: bank lives at 0x90600000. The Daisy bootloader's writable QSPI
 // region ends at 0x907BFFFF (layout "@Flash /0x90000000/64*4Kg/0x90040000/
@@ -194,9 +194,11 @@ function minimumPhase(samples: Float32Array, eps = 1e-8): Float32Array {
   return out;
 }
 
-function trimTaper(samples: Float32Array, nTaps: number, fadeLen = 64): Float32Array {
-  const out = new Float32Array(nTaps);
-  out.set(samples.subarray(0, Math.min(samples.length, nTaps)));
+// IRs already within nTaps are kept as they are, not zero-padded: the
+// firmware's convolver only spends CPU on the partitions an IR occupies.
+function trimTaper(samples: Float32Array, nTaps: number, fadeLen = 256): Float32Array {
+  if (samples.length <= nTaps) return samples.slice();
+  const out = samples.slice(0, nTaps);
   fadeLen = Math.min(fadeLen, nTaps);
   const start = nTaps - fadeLen;
   for (let i = 0; i < fadeLen; i++) {
@@ -209,7 +211,7 @@ function trimTaper(samples: Float32Array, nTaps: number, fadeLen = 64): Float32A
 export function processIr(samples: Float32Array, sampleRate: number, targetRate = 48000): Float32Array {
   let s = resampleLinear(samples, sampleRate, targetRate);
   s = minimumPhase(s);
-  s = trimTaper(s, MAX_IR_TAPS, 64);
+  s = trimTaper(s, MAX_IR_TAPS, 256);
   let peak = 0;
   for (let i = 0; i < s.length; i++) peak = Math.max(peak, Math.abs(s[i]));
   if (peak > 1e-30) {

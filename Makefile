@@ -33,13 +33,29 @@ LDFLAGS = -u _printf_float
 
 # libDaisy's QSPI linker script with the engine repo's itcm_section.lds
 # inserted before .text, so the engine's code runs from zero-wait ITCM
-# (t3k_pedal.cpp copies it from QSPI at boot). Generated below.
+# (t3k_pedal.cpp copies it from QSPI at boot). Generated below, with
+# daisyConvol's engine and the CMSIS FFT kernels added to the same section:
+# run from QSPI through the I-cache next to NAM, they cost about twice as much.
 LDSCRIPT = $(BUILD_DIR)/$(TARGET).lds
 
 ifeq ($(wildcard $(SYSTEM_FILES_DIR)/Makefile),)
 $(error libDaisy not found at $(LIBDAISY_DIR): run 'git submodule update --init --recursive' (or pass LIBDAISY_DIR=...))
 endif
-include $(SYSTEM_FILES_DIR)/Makefile
+
+# Cabinet IR convolution: daisyConvol (VZtec/daisyConvol, git submodule pinned
+# to a release), zero-latency partitioned FFT convolution on CMSIS-DSP.
+# Its .mk adds the engine and CMSIS FFT sources, then includes libDaisy's core
+# Makefile itself.  The engine runs 16-sample blocks (the only power of two
+# dividing the 48-frame audio block; t3k_pedal.cpp calls it three times per
+# callback), and IRs up to 4096 samples need no SDRAM or main-loop stage.
+# DAISYCONVOL_MAX_IR must match kMaxIrLen in t3k_pedal.cpp.
+DAISYCONVOL_DIR    = daisyConvol
+DAISYCONVOL_BLOCKS = 16
+DAISYCONVOL_MAX_IR = 4096
+ifeq ($(wildcard $(DAISYCONVOL_DIR)/daisyconvol.mk),)
+$(error daisyConvol not found at $(DAISYCONVOL_DIR): run 'git submodule update --init --recursive')
+endif
+include $(DAISYCONVOL_DIR)/daisyconvol.mk
 
 # Presets are stored in a separate QSPI flash region (0x90600000) and loaded
 # at runtime — no rebuild needed to swap models.  Use the companion app (app/)
@@ -62,11 +78,22 @@ NAM_DEFS = -DNAM_A2LITE_MAX_BUFFER_SIZE=48 \
 CFLAGS   += -ffast-math $(NAM_DEFS)
 CPPFLAGS += $(NAM_DEFS)
 
+# libDaisy's CPPFLAGS expands CFLAGS, so -ffast-math reaches C++ too.  Keep
+# daisyConvol's engine IEEE-strict: its NaN/inf guards on the IR and the input
+# (fabs(x) <= FLT_MAX) would be folded away under -ffinite-math-only.
+$(BUILD_DIR)/conv_engine.o: CPPFLAGS += -fno-fast-math
+
 $(BUILD_DIR)/nam_a2lite.o $(BUILD_DIR)/t3k_pedal.o: $(A2LITE_DIR)/nam_a2lite.h
 
 ITCM_LDS = $(EMBEDDED_DIR)/bench/cortex-m7/daisy_seed/itcm_section.lds
-$(BUILD_DIR)/$(TARGET).lds: $(SYSTEM_FILES_DIR)/STM32H750IB_qspi.lds $(ITCM_LDS) | $(BUILD_DIR)
-	awk 'FNR == NR { blk = blk $$0 "\n"; next } \
+ITCM_EXTRA_OBJS = conv_engine fft_backend_cmsis arm_cfft_f32 arm_cfft_radix8_f32 \
+                  arm_rfft_fast_f32 cmsis_bitreversal
+$(BUILD_DIR)/$(TARGET).lds: $(SYSTEM_FILES_DIR)/STM32H750IB_qspi.lds $(ITCM_LDS) Makefile | $(BUILD_DIR)
+	awk -v extra='$(ITCM_EXTRA_OBJS)' \
+	    'FNR == NR { blk = blk $$0 "\n"; \
+	                 if ($$0 ~ /nam_a2lite\*\.o/) { n = split(extra, o, " "); \
+	                   for (i = 1; i <= n; i++) blk = blk "\t\t*" o[i] ".o(.text .text*)\n" } \
+	                 next } \
 	     !done && /^[ \t]*\.text[ \t]*:/ { printf "%s", blk; done = 1 } \
 	     { print } \
 	     END { if (!done) { print "no .text section found" > "/dev/stderr"; exit 1 } }' \

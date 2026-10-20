@@ -21,7 +21,7 @@ Usage:
   IR     optional cabinet IR WAV file instead of NAM2
          (PCM 16/24/32-bit or IEEE float 32-bit, mono or multi-channel)
          Only channel 0 is used.  IR is truncated to MAX_IR_TAPS samples
-         (256 taps ≈ 5.3 ms @ 48 kHz).
+         (4096 taps ≈ 85 ms @ 48 kHz).
 
   A file may carry its TONE3000 model id as `path@ID` (e.g. amp.nam@476289).
   The id is stored in the bank so the companion app's "Sync from pedal" can
@@ -71,7 +71,7 @@ BANK_VERSION = 2
 HEADER_SIZE  = 64          # bytes
 ENTRY_SIZE   = 64          # name(32) + nam offset/size + nam2 offset/size + ir offset/num_samples + 2 model ids
 NAMB_MAGIC   = 0x4E414D42  # "NAMB"
-MAX_IR_TAPS  = 256         # must match MAX_IR_TAPS in t3k_pedal.cpp
+MAX_IR_TAPS  = 4096        # must match kMaxIrLen in t3k_pedal.cpp
 
 
 # ── WAV reader ────────────────────────────────────────────────────────────
@@ -205,11 +205,16 @@ def _ir_minimum_phase(samples, eps=1e-8):
     return list(h_mp[:n])
 
 
-def _ir_trim_taper(samples, n_taps, fade_len=64):
-    """Truncate to n_taps with a Hann half-window over the last fade_len samples."""
+def _ir_trim_taper(samples, n_taps, fade_len=256):
+    """Truncate to n_taps with a Hann half-window over the last fade_len samples.
+
+    IRs already within n_taps are kept as they are, not zero-padded: the
+    firmware's convolver only spends CPU on the partitions an IR occupies.
+    """
     import math as _math
-    out = list(samples[:n_taps]) if len(samples) >= n_taps \
-          else list(samples) + [0.0] * (n_taps - len(samples))
+    if len(samples) <= n_taps:
+        return list(samples)
+    out = list(samples[:n_taps])
     fade_len = min(fade_len, n_taps)
     start = n_taps - fade_len
     for i in range(fade_len):
@@ -241,7 +246,7 @@ def process_ir(samples, sample_rate, target_rate=48000, max_taps=MAX_IR_TAPS):
 
     # Truncate + Hann tail taper
     n_in = len(samples)
-    fade = 64  # 25% of 256; chosen to smooth the truncation without sacrificing body
+    fade = 256  # ~5 ms: smooths the truncation without sacrificing body
     samples = _ir_trim_taper(samples, max_taps, fade_len=fade)
     if n_in > max_taps:
         print(f'       truncated {n_in} → {max_taps} taps '

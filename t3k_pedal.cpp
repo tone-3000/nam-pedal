@@ -52,6 +52,9 @@ extern "C"
 }
 #include "namb_reader.h"
 
+#include "daisyconvol/daisyconvol.h"
+#include "daisyconvol_daisy/seed.h"
+
 using namespace daisy;
 using namespace t3k_pedal;
 
@@ -95,10 +98,10 @@ static constexpr uint32_t MODEL_BANK_ADDR    = 0x90600000UL;
 static constexpr uint32_t MODEL_BANK_MAGIC   = 0x504D414E; // "NAMP"
 static constexpr uint32_t MODEL_BANK_VERSION = 2;
 
-// Maximum IR length supported.  At 48 kHz: 256 taps ≈ 5.3 ms.
-// Time-domain FIR with DTCM buffers costs n × L × 3.75 cycles per block.
-// At 256 taps: 256 × 48 × 3.75 ≈ 46K cycles ≈ 10% of the 480K-cycle budget.
-static constexpr uint32_t MAX_IR_TAPS = 256;
+// Maximum IR length supported.  At 48 kHz: 4096 samples ≈ 85 ms.  Must match
+// DAISYCONVOL_MAX_IR in the Makefile and MAX_IR_TAPS in pack_models.py and the
+// app; longer IRs in the bank are truncated at load.
+static constexpr uint32_t kMaxIrLen = 4096;
 
 struct ModelBankHeader
 {
@@ -196,15 +199,39 @@ static constexpr size_t kMaxBlockSize = NAM_A2LITE_MAX_BUFFER_SIZE;
 static NAM_DTCM float   mono_in[kMaxBlockSize];
 static NAM_DTCM float   mono_out[kMaxBlockSize];
 
-// Time-domain FIR cabinet convolution.
+// Cabinet IR convolution: daisyConvol's zero-latency partitioned convolver.
 //
-// IR convolution buffers in DTCM (zero wait-state access).
-// Coefficients are stored time-reversed for a cache-friendly forward scan.
-// State buffer uses a double-write circular scheme (see IrProcess).
-static NAM_DTCM float    g_ir_coeffs[MAX_IR_TAPS];
-static NAM_DTCM float    g_ir_state[2 * MAX_IR_TAPS + kMaxBlockSize - 1];
-static volatile uint32_t g_ir_num_taps = 0;
-static NAM_DTCM uint32_t g_ir_head = 0; // write pos, cycles [0, MAX_IR_TAPS)
+// The engine needs a power-of-two block, so it runs 16-sample blocks, three
+// per 48-frame callback (see IrProcess); its default geometry for a 4096-sample
+// IR is then 16 x 16 + 30 x 128 partitions, all inside the callback. Arenas
+// as its README recommends: the per-callback state (fast) and the FFT tables
+// in DTCM, the stage-1 spectra and delay line (medium, 60 KB) in AXI SRAM.
+using daisyconvol::ConvEngine;
+static constexpr size_t kConvBlock = 16;
+static_assert(kMaxBlockSize % kConvBlock == 0,
+              "the audio block must be a multiple of the convolver block");
+
+static constexpr ConvEngine::Config MakeConvConfig()
+{
+    ConvEngine::Config c;
+    c.block_size       = kConvBlock;
+    c.max_ir_len       = kMaxIrLen;
+    c.allow_background = false; // cabinets only: no main-loop stage
+    c.get_cycles       = daisyconvol_daisy::CycleCount;
+    return c;
+}
+static constexpr ConvEngine::Config kConvConfig = MakeConvConfig();
+static_assert(ConvEngine::FastFloats(kConvConfig) > 0, "invalid convolver config");
+static_assert(ConvEngine::SlowFloats(kConvConfig) == 0, "cabinet IRs need no SDRAM");
+
+alignas(32) static NAM_DTCM float conv_fast[ConvEngine::FastFloats(kConvConfig)];
+alignas(32) static float conv_medium[ConvEngine::MediumFloats(kConvConfig)];
+alignas(32) static NAM_DTCM uint8_t
+                  conv_fft_tables[ConvEngine::FftTableBytes(kConvConfig)];
+static ConvEngine conv;
+static bool       conv_ready  = false; // Init succeeded
+static volatile bool  g_ir_loaded = false; // block 2 is a cabinet IR
+static volatile float g_ir_gain   = 1.0f;  // gain staging, see IrGain
 
 // ── Noise gate ────────────────────────────────────────────────────────────
 //
@@ -423,9 +450,9 @@ static void StageChain()
 // OUTPUT only attenuates, so that convention would leave every IR preset
 // ~10 dB under its NAM-only neighbours with no way to make it up.
 //
-// Measured directly: a 64-point DFT of the 256-tap kernel at log-spaced
-// frequencies (16K MACs, once per preset load). Folded into the FIR
-// coefficients, so it costs nothing at runtime.
+// Measured directly: a 64-point DFT of the kernel at log-spaced frequencies
+// (256K MACs for a 4096-sample IR, a few ms once per preset load). Applied
+// to the convolver's output, one multiply per sample.
 static constexpr float kIrBandLoHz   = 100.0f;
 static constexpr float kIrBandHiHz   = 5000.0f;
 static constexpr int   kIrBandPoints = 64;
@@ -509,31 +536,32 @@ static bool LoadCapture(int slot, const uint8_t* data, uint32_t size)
     return true;
 }
 
-// Load a cabinet IR from the bank into the FIR buffers (time-reversed).
-static void LoadIr(uint32_t ir_offset, uint32_t ir_num_samples)
+// Load a cabinet IR from the bank into the convolver (computes its partition
+// spectra and clears the engine's delay lines). Audio must not be calling
+// IrProcess meanwhile: LoadPreset runs with the chain bypassed.
+static bool LoadIr(uint32_t ir_offset, uint32_t ir_num_samples)
 {
     uint32_t taps = ir_num_samples;
-    if(taps > MAX_IR_TAPS)
+    if(taps > kMaxIrLen)
     {
         LOG("  IR: %lu taps truncated to %lu",
             (unsigned long)taps,
-            (unsigned long)MAX_IR_TAPS);
-        taps = MAX_IR_TAPS;
+            (unsigned long)kMaxIrLen);
+        taps = kMaxIrLen;
     }
 
     // IR float32 data sits directly in XIP QSPI (4-byte aligned by packer).
     const float* ir_src
         = reinterpret_cast<const float*>(MODEL_BANK_ADDR + ir_offset);
 
-    // Store time-reversed so the inner loop scans forwards through both
-    // the coefficient and state arrays (cache-friendly, compiler-vectorisable),
-    // with the block's gain staging baked into the coefficients.
-    const float gain = IrGain(ir_src, taps, hw.AudioSampleRate());
-    for(uint32_t j = 0; j < taps; j++)
-        g_ir_coeffs[j] = ir_src[taps - 1 - j] * gain;
-
-    g_ir_num_taps = taps;
+    if(!conv_ready || !conv.SetIR(ir_src, taps))
+    {
+        LOG("  IR: rejected (convolver not ready, or non-finite samples)");
+        return false;
+    }
+    g_ir_gain = IrGain(ir_src, taps, hw.AudioSampleRate());
     LOG("  IR: %lu taps (%.1f ms)", (unsigned long)taps, (float)taps / 48.0f);
+    return true;
 }
 
 // Load the preset at the given index from the QSPI bank.
@@ -596,10 +624,8 @@ static bool LoadPreset(uint32_t idx)
 
     // ── Block 2: NAM or cabinet IR ────────────────────────────────────────
     // Clear both regardless of what the new preset carries.
-    nam2_loaded   = false;
-    g_ir_num_taps = 0;
-    g_ir_head     = 0;
-    memset(g_ir_state, 0, sizeof(g_ir_state));
+    nam2_loaded = false;
+    g_ir_loaded = false;
 
     if(e.nam2_size != 0)
     {
@@ -610,7 +636,9 @@ static bool LoadPreset(uint32_t idx)
     }
     else if(e.ir_offset != 0 && e.ir_num_samples > 0)
     {
-        LoadIr(e.ir_offset, e.ir_num_samples);
+        if(!LoadIr(e.ir_offset, e.ir_num_samples))
+            return false;
+        g_ir_loaded = true;
     }
     else
     {
@@ -740,51 +768,16 @@ static int ReadRotaryPreset()
 
 // ── IR convolution ────────────────────────────────────────────────────────
 //
-// Double-write circular buffer FIR with time-reversed coefficients.
-// All data (coefficients and state) lives in DTCM for zero wait-state access.
-//
-// Each new sample is written at position p and p + MAX_IR_TAPS so that any
-// n-sample read window is always contiguous — no wrap-around logic in the
-// inner loop, no memmove on block exit.  src and dst must be distinct.
+// The convolver runs kConvBlock-sample blocks, so a callback's block is fed
+// through it in slices; zero added latency either way. src and dst may alias.
 
-static void IrProcess(const float* __restrict__ src,
-                      float* __restrict__ dst,
-                      uint32_t block_size)
+static void IrProcess(const float* src, float* dst, uint32_t block_size)
 {
-    const uint32_t n    = g_ir_num_taps;
-    const uint32_t head = g_ir_head;
-
-    memcpy(g_ir_state + head, src, block_size * sizeof(float));
-    memcpy(g_ir_state + head + MAX_IR_TAPS, src, block_size * sizeof(float));
-
+    for(uint32_t i = 0; i < block_size; i += kConvBlock)
+        conv.ProcessBlock(src + i, dst + i, kConvBlock);
+    const float g = g_ir_gain;
     for(uint32_t i = 0; i < block_size; i++)
-    {
-        const float* s      = g_ir_state + (head + i + MAX_IR_TAPS - (n - 1));
-        const float* coeffs = g_ir_coeffs;
-        // Four independent accumulators hide the M7 FPU's ~5-cycle MAC latency.
-        float acc0 = 0.0f, acc1 = 0.0f, acc2 = 0.0f, acc3 = 0.0f;
-
-        uint32_t k = n >> 2;
-        while(k--)
-        {
-            acc0 += coeffs[0] * s[0];
-            acc1 += coeffs[1] * s[1];
-            acc2 += coeffs[2] * s[2];
-            acc3 += coeffs[3] * s[3];
-            coeffs += 4;
-            s += 4;
-        }
-        float acc = (acc0 + acc1) + (acc2 + acc3);
-        k         = n & 3;
-        while(k--)
-            acc += *coeffs++ * *s++;
-
-        dst[i] = acc;
-    }
-
-    g_ir_head = head + block_size;
-    if(g_ir_head >= MAX_IR_TAPS)
-        g_ir_head -= MAX_IR_TAPS;
+        dst[i] *= g;
 }
 
 // ── Signal chain ──────────────────────────────────────────────────────────
@@ -798,7 +791,7 @@ static void IrProcess(const float* __restrict__ src,
 //   EQ:     in place, after the whole block chain
 // Each NAM block is wrapped in its pre gain (input calibration) and post
 // gain (calibrated hand-off or loudness normalize); the IR's gain staging is
-// already folded into its coefficients. See StageChain / IrGain.
+// applied inside IrProcess. See StageChain / IrGain.
 static inline void NamBlock(int slot, float* in, float* out, size_t num_frames)
 {
     const float pre  = nam_pre_gain[slot];
@@ -826,7 +819,7 @@ static inline const float* ProcessChain(size_t num_frames)
         NamBlock(1, mono_out, mono_in, num_frames);
         out = mono_in;
     }
-    else if(g_ir_num_taps > 0)
+    else if(g_ir_loaded)
     {
         IrProcess(mono_out, mono_in, num_frames);
         out = mono_in;
@@ -902,9 +895,12 @@ static void AudioCallback(AudioHandle::InterleavingInputBuffer  in,
 
 // ── Entry point ───────────────────────────────────────────────────────────
 
-// The engine's code is linked into .itcmram_text (ITCM, zero wait states)
-// but stored in QSPI flash; the Makefile's derived linker script defines
-// these symbols. Copy it over before anything calls into the engine.
+// The engines' code (NAM, convolver, CMSIS FFT) is linked into .itcmram_text
+// (ITCM, zero wait states) but stored in QSPI flash; the Makefile's derived
+// linker script defines these symbols. The copy runs from .preinit_array,
+// i.e. before any C++ static initializer: some of those live in ITCM too
+// (daisyConvol's FFT backend has one), and would otherwise run from
+// uninitialized ITCM and fault before main().
 extern "C" uint32_t _sitcmram_text, _itcmram_text_start, _itcmram_text_end;
 
 static void CopyCodeToItcm()
@@ -916,11 +912,11 @@ static void CopyCodeToItcm()
     __DSB();
     __ISB();
 }
+__attribute__((section(".preinit_array"), used)) static void (*const
+    copy_code_to_itcm_entry)() = CopyCodeToItcm;
 
 int main(void)
 {
-    CopyCodeToItcm();
-
     // Boost = 480 MHz (libDaisy's default is 400 MHz). Two chained A2-Lite
     // captures need it: they take ~83% of the block at 480 MHz.
     hw.Init(true);
@@ -943,6 +939,20 @@ int main(void)
 #endif
 
     hw.SetAudioBlockSize(kMaxBlockSize);
+
+    // Cabinet convolver: lays out (and zeroes) its arenas and FFT plans, then
+    // moves the FFT twiddle / bit-reversal tables from QSPI into DTCM.
+    // The DWT cycle counter (enabled further down) feeds conv.perf().
+    conv_ready = conv.Init(kConvConfig,
+                           {conv_fast, ConvEngine::FastFloats(kConvConfig), 0},
+                           {conv_medium, ConvEngine::MediumFloats(kConvConfig), 0},
+                           {})
+                 && daisyconvol::FftRelocateTables(conv_fft_tables,
+                                                   sizeof(conv_fft_tables));
+    LOG("Convolver: %s (block %u, IR up to %lu samples)",
+        conv_ready ? "ready" : "INIT FAILED",
+        (unsigned)kConvBlock,
+        (unsigned long)kMaxIrLen);
     eq.Init(hw.AudioSampleRate());
     gate.Init(hw.AudioSampleRate());
 
@@ -1021,7 +1031,7 @@ int main(void)
         const uint32_t avg = sum / kRuns;
         LOG("Benchmark %s%s (%d x %u frames, budget %lu cy): avg %lu (%.1f%%)  max %lu (%.1f%%)",
             nam2_loaded ? "NAM + NAM" : "NAM",
-            g_ir_num_taps > 0 ? " + IR" : "",
+            g_ir_loaded ? " + IR" : "",
             kRuns,
             (unsigned)kMaxBlockSize,
             (unsigned long)kBlockBudgetCycles,
@@ -1194,6 +1204,16 @@ int main(void)
                 led_preset[1].Read() ? 1 : 0,
                 led_preset[2].Read() ? 1 : 0,
                 led_preset[3].Read() ? 1 : 0);
+            if(g_ir_loaded)
+            {
+                // Per 16-sample engine block; x3 per audio callback.
+                const daisyconvol::Perf p = conv.perf();
+                LOG("  IR conv: avg %lu cy  peak %lu cy  (x3 per callback)"
+                    "  nonfinite=%lu",
+                    (unsigned long)p.callback.Avg(),
+                    (unsigned long)p.callback.peak,
+                    (unsigned long)p.nonfinite_inputs);
+            }
             LOG("  gain=%.2f vol=%.2f eq[%.1f %.1f %.1f]",
                 gain,
                 volume,
